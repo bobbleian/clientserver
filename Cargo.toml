@@ -1,0 +1,13 @@
+[package]
+name = "clientserver"
+version = "0.1.0"
+authors = ["ianc"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rustls = "0.16.0"
+webpki-roots = "0.17.0"
+webpki = "0.21.0"
+mio = "0.6.19"
