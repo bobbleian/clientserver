@@ -22,13 +22,13 @@ fn main () {
 
     // rustls configuration
     let mut config = ServerConfig::new(NoClientAuth::new());
-    let certs = load_certs("C:\\Users\\ianc\\rootCertificate.pem");
-    let privkey = load_private_key("C:\\Users\\ianc\\rootPrivkey.pem");
+    let certs = load_certs("/home/ianc/rootCertificate.pem");
+    let privkey = load_private_key("/home/ianc/rootPrivkey.pem");
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
     let rc_config = Arc::new(config);
     //let mut server = ServerSession::new(&rc_config);
 
-    let addr: net::SocketAddr = "127.0.0.1:97".parse().unwrap();
+    let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
 
     let poll = Poll::new().unwrap();
@@ -62,6 +62,13 @@ fn main () {
                     //println!("Got a token");
                     if event.readiness().is_readable() && tls_servers.get_mut(&token).unwrap().wants_read() {
                         match tls_servers.get_mut(&token).unwrap().read_tls(sockets.get_mut(&token).unwrap()) {
+                            Ok(0) => {
+                                // Socket is closed
+                                println!("Socket closed");
+                                poll.deregister(sockets.get(&token).unwrap()).unwrap();
+                                sockets.remove(&token);
+                                break;
+                            }
                             Ok(n) => {
                                 println!("read_tls: {} bytes", n);
                                 // Process packets

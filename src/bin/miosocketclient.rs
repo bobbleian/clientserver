@@ -12,7 +12,7 @@ fn main () {
 
     // rustls configuration
     let mut config = rustls::ClientConfig::new();
-    let certfile = fs::File::open("C:\\Users\\ianc\\rootCertificate.pem").expect("Cannot open CA file");
+    let certfile = fs::File::open("/home/ianc/rootCertificate.pem").expect("Cannot open CA file");
     let mut reader = BufReader::new(certfile);
     config.root_store.add_pem_file(&mut reader).unwrap();
     let rc_config = Arc::new(config);
@@ -22,7 +22,7 @@ fn main () {
     let poll = Poll::new().unwrap();
 
 
-    let addr: net::SocketAddr = "127.0.0.1:97".parse().unwrap();
+    let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     match TcpStream::connect(&addr) {
         Ok(mut stream) => {
 
@@ -96,6 +96,11 @@ fn main () {
                 if event.readiness().is_readable() && client.wants_read() {
                     //match stream.read(&mut data) {
                     match client.read_tls(&mut stream) {
+                        Ok(0) => {
+                            // Socket is closed
+                            println!("Socket closed");
+                            break 'outer;
+                        }
                         Ok(n) => {
                             println!("read_tls: {} bytes", n);
                             client.process_new_packets().unwrap();
