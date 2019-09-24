@@ -1,9 +1,7 @@
 use std::{str,fs};
-use std::io;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write, BufReader};
 use std::net;
-use std::collections::HashMap;
-use std::io::{BufReader};
+use std::collections::{HashMap};
 use std::sync::{Arc};
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
@@ -14,11 +12,21 @@ use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
 
 const LISTENER: Token = Token(0);
 
+// Enumeration to store client state
+enum ClientState {
+    Connected,
+    WaitingOnOpponent(String),
+    GamePending,
+    GameInProgress(Token),
+}
+
 fn main () {
     // Used to store the sockets.
     let mut sockets = HashMap::new();
     let mut tls_servers = HashMap::new();
-    let mut pending_data = HashMap::new();
+
+    // Used to store client status
+    let mut client_status: HashMap<Token, ClientState> = HashMap::new();
 
     // rustls configuration
     let mut config = ServerConfig::new(NoClientAuth::new());
@@ -49,7 +57,7 @@ fn main () {
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
                             sockets.insert(token, socket);
                             tls_servers.insert(token, ServerSession::new(&rc_config));
-                            pending_data.insert(token, Vec::<String>::new());
+                            client_status.insert(token, ClientState::Connected);
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             println!("Listeneing socket would block");
@@ -85,14 +93,27 @@ fn main () {
                                                     Ok(v) => {
                                                         print!("{}", v);
 
-                                                        // Add string to pending data queue to be send back to all
-                                                        // connected clients
-                                                        for servers in tls_servers.values_mut() {
-                                                            servers.write(v.as_bytes()).unwrap();
+                                                        // Got a string from the client, process it
+                                                        // based on the client state
+                                                        match client_status.get(&token).unwrap() {
+                                                            ClientState::Connected => {
+                                                                println!("Got client name, now WaitingOnOpponent");
+                                                                // Update client status to
+                                                                // WaitingOnOpponent
+                                                                *client_status.get_mut(&token).unwrap() =
+                                                                    ClientState::WaitingOnOpponent(v.to_string());
+
+                                                            },
+                                                            ClientState::WaitingOnOpponent(name) => {
+                                                                println!("Still waiting on opponent for client: {}", name);
+                                                            },
+                                                            ClientState::GameInProgress(partner_token) => {
+                                                                println!("Send string to partner");
+                                                                tls_servers.get_mut(&partner_token).unwrap().write(v.as_bytes()).unwrap();
+                                                            },
+                                                            _ => (),
                                                         }
-                                                        for val in pending_data.values_mut() {
-                                                            val.push(v.to_string());
-                                                        }
+
                                                     }
                                                     Err(_) => panic!("invalid utf-8 sequence!"),
                                                 };
@@ -135,35 +156,46 @@ fn main () {
                             }
                             e => panic!("err={:?}", e), // Unexpected error
                         }
+                    }
 
-                        /* Deal with this later
-                        if let Some(data) = pending_data.get_mut(&token) {
-                            if !data.is_empty() {
-                            println!("Writing back to stream");
-                            match sockets.get_mut(&token).unwrap().write(data.remove(0).as_bytes()) {
-                                Ok(size) => {
-                                    println!("Wrote {} bytes", size);
+                    // Check to see if there are two clients we can pair up in a game
+                    // See if there are any other
+                    // clients we could start a game
+                    // with
+                    let mut partner1_token: Option<Token> = None;
+                    let mut partner2_token: Option<Token> = None;
+                    for (check_token, check_status) in client_status.iter() {
+                        match check_status {
+                            ClientState::WaitingOnOpponent(name) => {
+                                // Found a client waiting for an opponent
+                                if partner1_token == None {
+                                    println!("Found first client who is waiting for a game: {}", name);
+                                    partner1_token = Some(*check_token);
+                                    continue;
+                                } else if partner2_token == None {
+                                    println!("Found second client who is waiting for a game: {}", name);
+                                    partner2_token = Some(*check_token);
                                     break;
+                                } else {
+                                    unreachable!();
                                 }
-                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                    // Socket is not ready anymore, stop reading
-                                    println!("Would block, breaking loop");
-                                    break;
-                                }
-                                Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
-                                    // Socket is not ready anymore, stop reading
-                                    println!("Connection reset");
-                                    break;
-                                }
-                                e => panic!("err={:?}", e), // Unexpected error
                             }
-                            }
+                            _ => (),
                         }
-                        */
+                    }
+
+                    if let Some(partner1_token) = partner1_token {
+                        if let Some(partner2_token) = partner2_token {
+                            // Have two clients to match up in a game
+                            // Update client status
+                            *client_status.get_mut(&partner1_token).unwrap() = ClientState::GameInProgress(partner2_token);
+                            *client_status.get_mut(&partner2_token).unwrap() = ClientState::GameInProgress(partner1_token);
+                        }
                     }
 
                 },
             }
+
         }
     }
 }

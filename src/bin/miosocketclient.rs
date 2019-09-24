@@ -25,17 +25,27 @@ fn main () {
     let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     match TcpStream::connect(&addr) {
         Ok(mut stream) => {
-
             // Spawn thread to read user input
             let (tx, rx) = mpsc::channel();
 
             thread::spawn(move || {
+                let mut user_name = String::new();
                 loop {
                     let stdin = io::stdin();
                     let mut buffer = String::new();
 
+                    // Display user-prompt
+                    if user_name.is_empty() {
+                        println!("Please enter user name: ");
+                    } else {
+                        println!("[{}] ", user_name);
+                    }
+
                     match stdin.read_line(&mut buffer) {
                         Ok(_n) => {
+                            if user_name.is_empty() {
+                                user_name = buffer.clone().trim().to_string();
+                            }
                             tx.send(buffer).unwrap();
                         },
                         Err(err) => {
@@ -86,6 +96,11 @@ fn main () {
                         Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
                             // Socket is not ready anymore, stop reading
                             println!("Connection reset breaking");
+                            break 'outer;
+                        }
+                        Err(ref e) if e.kind() == io::ErrorKind::ConnectionRefused => {
+                            // Unable to connect to server
+                            println!("Server unavailable");
                             break 'outer;
                         }
                         e => panic!("err={:?}", e), // Unexpected error
