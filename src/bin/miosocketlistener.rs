@@ -7,6 +7,8 @@ use std::sync::{Arc};
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::{TcpListener};
 
+use log::{debug};
+
 use rustls;
 use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
 
@@ -17,7 +19,7 @@ enum ClientState {
     Connected,
     WaitingOnOpponent(String),
     GamePending,
-    GameInProgress(Token),
+    GameInProgress(String, Token),
 }
 
 fn main () {
@@ -60,7 +62,7 @@ fn main () {
                             client_status.insert(token, ClientState::Connected);
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            println!("Listeneing socket would block");
+                            println!("Listening socket would block");
                             break;
                         },
                         e => panic!("Err={:?}", e),
@@ -71,10 +73,36 @@ fn main () {
                     if event.readiness().is_readable() && tls_servers.get_mut(&token).unwrap().wants_read() {
                         match tls_servers.get_mut(&token).unwrap().read_tls(sockets.get_mut(&token).unwrap()) {
                             Ok(0) => {
+                                // Client disconnected, find partner client if it exists
+                                let mut partner_token: Option<Token> = None;
+                                match client_status.get(&token).unwrap() {
+                                    ClientState::GameInProgress(_name, temp_partner_token) => {
+                                        partner_token = Some(*temp_partner_token);
+                                    },
+                                    _ => (),
+                                }
+
+                                // Current client no longer has status
+                                client_status.remove(&token);
+
+                                // Clean up state of partner if necessary
+                                if let Some(partner_token) = partner_token {
+                                    match client_status.get(&partner_token).unwrap() {
+                                        ClientState::GameInProgress(partner_name, _token) => {
+                                            println!("Client disconnected, update partner: {}", partner_name);
+                                            let staged_data: [u8; 2] = [0, 0];
+                                            tls_servers.get_mut(&partner_token).unwrap().write(&staged_data).unwrap();
+                                            *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent(partner_name.to_string());
+                                        },
+                                        _ => unreachable!(),
+                                    }
+                                }
+
                                 // Socket is closed
                                 println!("Socket closed");
                                 poll.deregister(sockets.get(&token).unwrap()).unwrap();
                                 sockets.remove(&token);
+                                client_status.remove(&token);
                                 break;
                             }
                             Ok(n) => {
@@ -89,7 +117,7 @@ fn main () {
                                                 println!("read_to_end: {}", n);
                                                 println!("Got a string length: {}", plaintext.len());
                                                 // Echo everything to stdout
-                                                match str::from_utf8(&plaintext[0..plaintext.len()]) {
+                                                match str::from_utf8(&plaintext[..]) {
                                                     Ok(v) => {
                                                         print!("{}", v);
 
@@ -107,7 +135,7 @@ fn main () {
                                                             ClientState::WaitingOnOpponent(name) => {
                                                                 println!("Still waiting on opponent for client: {}", name);
                                                             },
-                                                            ClientState::GameInProgress(partner_token) => {
+                                                            ClientState::GameInProgress(_partner_name, partner_token) => {
                                                                 println!("Send string to partner");
                                                                 tls_servers.get_mut(&partner_token).unwrap().write(v.as_bytes()).unwrap();
                                                             },
@@ -163,18 +191,22 @@ fn main () {
                     // clients we could start a game
                     // with
                     let mut partner1_token: Option<Token> = None;
+                    let mut partner1_name = String::new();
                     let mut partner2_token: Option<Token> = None;
+                    let mut partner2_name = String::new();
                     for (check_token, check_status) in client_status.iter() {
                         match check_status {
                             ClientState::WaitingOnOpponent(name) => {
                                 // Found a client waiting for an opponent
                                 if partner1_token == None {
-                                    println!("Found first client who is waiting for a game: {}", name);
+                                    debug!("Found first client who is waiting for a game: {}", name);
                                     partner1_token = Some(*check_token);
+                                    partner1_name = name.to_string();
                                     continue;
                                 } else if partner2_token == None {
-                                    println!("Found second client who is waiting for a game: {}", name);
+                                    debug!("Found second client who is waiting for a game: {}", name);
                                     partner2_token = Some(*check_token);
+                                    partner2_name = name.to_string();
                                     break;
                                 } else {
                                     unreachable!();
@@ -188,8 +220,12 @@ fn main () {
                         if let Some(partner2_token) = partner2_token {
                             // Have two clients to match up in a game
                             // Update client status
-                            *client_status.get_mut(&partner1_token).unwrap() = ClientState::GameInProgress(partner2_token);
-                            *client_status.get_mut(&partner2_token).unwrap() = ClientState::GameInProgress(partner1_token);
+                            if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
+                                *partner1_status = ClientState::GameInProgress(partner1_name, partner2_token);
+                            }
+                            if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
+                                *partner2_status = ClientState::GameInProgress(partner2_name, partner1_token);
+                            }
                         }
                     }
 

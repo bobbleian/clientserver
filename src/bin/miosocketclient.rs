@@ -2,6 +2,8 @@ use std::{net,str,thread,fs};
 use std::io::{self,BufReader,Read,Write};
 use std::sync::{mpsc,Arc};
 
+use log::{debug,warn};
+
 use mio::{Events, Poll, Ready, PollOpt, Token, net::TcpStream};
 
 use rustls::{ClientSession,Session};
@@ -36,10 +38,11 @@ fn main () {
 
                     // Display user-prompt
                     if user_name.is_empty() {
-                        println!("Please enter user name: ");
+                        print!("Please enter user name: ");
                     } else {
-                        println!("[{}] ", user_name);
+                        print!("> ");
                     }
+                    io::stdout().flush().unwrap();
 
                     match stdin.read_line(&mut buffer) {
                         Ok(_n) => {
@@ -49,7 +52,7 @@ fn main () {
                             tx.send(buffer).unwrap();
                         },
                         Err(err) => {
-                            println!("Error: {}", err);
+                            warn!("Error: {}", err);
                             break;
                         },
                     }
@@ -65,10 +68,14 @@ fn main () {
                 // See if we have any user input from the reader thread
                 match rx.try_recv() {
                     Ok(buffer) => {
-                        //println!("read_line read {} bytes", n);
-                        //println!("{}", buffer);
-                        match client.write(buffer.as_bytes()) {
-                            Ok(n) => println!("client wrote {} bytes", n),
+                        debug!("{}", buffer);
+                        let buffer_data = buffer.as_bytes();
+                        let mut staged_data: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
+                        staged_data.push(1);
+                        staged_data.push(buffer_data.len() as u8);
+                        staged_data.extend_from_slice(&buffer_data[..]);
+                        match client.write(&staged_data) {
+                            Ok(n) => debug!("client wrote {} bytes", n),
                             Err(e) => panic!(e),
                         }
                     },
@@ -87,15 +94,15 @@ fn main () {
                 if event.readiness().is_writable() && client.wants_write() {
                     match client.write_tls(&mut stream) {
                         Ok(size) => {
-                            println!("Wrote {} bytes", size);
+                            debug!("Wrote {} bytes", size);
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             // Socket is not ready anymore, stop reading
-                            println!("Would block");
+                            debug!("Would block");
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
                             // Socket is not ready anymore, stop reading
-                            println!("Connection reset breaking");
+                            debug!("Connection reset breaking");
                             break 'outer;
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::ConnectionRefused => {
@@ -113,33 +120,30 @@ fn main () {
                     match client.read_tls(&mut stream) {
                         Ok(0) => {
                             // Socket is closed
-                            println!("Socket closed");
+                            debug!("Socket closed");
                             break 'outer;
                         }
                         Ok(n) => {
-                            println!("read_tls: {} bytes", n);
+                            debug!("read_tls: {} bytes", n);
                             client.process_new_packets().unwrap();
                             // Echo everything to stdout
-                            let mut plaintext = Vec::new();
-                            match client.read_to_end(&mut plaintext) {
+                            let mut data: Vec<u8> = Vec::new();
+                            match client.read_to_end(&mut data) {
                                 Ok(0) => (),
+                                Ok(1) => unreachable!(),
                                 Ok(n) => {
-                                    println!("read_to_end: {}", n);
-                                    println!("Got a string length: {}", plaintext.len());
-                                    // Echo everything to stdout
-                                    match str::from_utf8(&plaintext[..]) {
-                                        Ok(v) => {
-                                            print!("{}", v);
-                                        }
-                                        Err(_) => panic!("invalid utf-8 sequence!"),
-                                    };
+                                    debug!("read_to_end: {}", n);
+                                    debug!("Got a data length: {}", data.len());
+
+                                    // process the data
+                                    process_server_data(data[0], data[1], &data[2..data.len()]);
                                 },
                                 Err(e) => panic!(e),
                             }
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             // Socket is not ready anymore, stop reading
-                            println!("Would block");
+                            debug!("Would block");
                         }
                         Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
                             // Socket is not ready anymore, stop reading
@@ -162,3 +166,27 @@ fn main () {
     }
 }
 
+
+fn process_server_data(control_byte: u8, data_len: u8, data: &[u8]) {
+    println!("Processing [control_byte: {}; data_len: {}]", control_byte, data_len);
+    match control_byte {
+        // 0: Opponent has disconnected
+        0 => {
+            println!("Your chat partner has ended the conversation...");
+        },
+
+        // 1: New message from opponent
+        1 => {
+            // Echo everything to stdout
+            match str::from_utf8(data) {
+                Ok(v) => {
+                    print!("{}", v);
+                }
+                Err(_) => panic!("invalid utf-8 sequence!"),
+            };
+        },
+
+        // Unknown control byte; do nothing?
+        _ => (),
+    }
+}
