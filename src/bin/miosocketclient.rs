@@ -2,7 +2,7 @@ use std::{net,str,thread,fs};
 use std::io::{self,BufReader,Read,Write};
 use std::sync::{mpsc,Arc};
 
-use log::{debug,warn};
+use log::{debug, info, warn};
 
 use mio::{Events, Poll, Ready, PollOpt, Token, net::TcpStream};
 
@@ -168,7 +168,7 @@ fn main () {
 
 
 fn process_server_data(control_byte: u8, data_len: u8, data: &[u8]) {
-    println!("Processing [control_byte: {}; data_len: {}]", control_byte, data_len);
+    info!("Processing [control_byte: {}; data_len: {}]", control_byte, data_len);
     match control_byte {
         // 0: Opponent has disconnected
         0 => {
@@ -180,13 +180,27 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8]) {
             // Echo everything to stdout
             match str::from_utf8(data) {
                 Ok(v) => {
-                    print!("{}", v);
+                    print!("{}> ", v);
+                    io::stdout().flush().unwrap();
+                }
+                Err(_) => panic!("invalid utf-8 sequence!"),
+            };
+        },
+
+        // 2: Partner name message
+        2 => {
+            // Echo everything to stdout
+            match str::from_utf8(data) {
+                Ok(v) => {
+                    print!("[{}] ", v);
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
         },
 
         // Unknown control byte; do nothing?
-        _ => (),
+        _ => {
+            println!("Unknown control byte");
+        }
     }
 }

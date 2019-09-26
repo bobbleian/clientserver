@@ -119,7 +119,7 @@ fn main () {
                                                 // Echo everything to stdout
                                                 match str::from_utf8(&plaintext[..]) {
                                                     Ok(v) => {
-                                                        print!("{}", v);
+                                                        println!("{}", v);
 
                                                         // Got a string from the client, process it
                                                         // based on the client state
@@ -129,13 +129,22 @@ fn main () {
                                                                 // Update client status to
                                                                 // WaitingOnOpponent
                                                                 *client_status.get_mut(&token).unwrap() =
-                                                                    ClientState::WaitingOnOpponent(v.to_string());
+                                                                    ClientState::WaitingOnOpponent(v.trim().to_string());
 
                                                             },
                                                             ClientState::WaitingOnOpponent(name) => {
                                                                 println!("Still waiting on opponent for client: {}", name);
                                                             },
-                                                            ClientState::GameInProgress(_partner_name, partner_token) => {
+                                                            ClientState::GameInProgress(name, partner_token) => {
+                                                                // send name to partner
+                                                                let buffer_data = name.as_bytes();
+                                                                let mut staged_data: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
+                                                                staged_data.push(2);
+                                                                staged_data.push(buffer_data.len() as u8);
+                                                                staged_data.extend_from_slice(&buffer_data[..]);
+                                                                tls_servers.get_mut(&partner_token).unwrap().write(&staged_data).unwrap();
+
+                                                                // forward packet from sender
                                                                 println!("Send string to partner");
                                                                 tls_servers.get_mut(&partner_token).unwrap().write(v.as_bytes()).unwrap();
                                                             },
