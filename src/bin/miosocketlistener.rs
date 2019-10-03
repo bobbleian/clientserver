@@ -12,20 +12,22 @@ use log::{debug};
 use rustls;
 use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
 
+use clientserver::GameData;
+
 const LISTENER: Token = Token(0);
 
 // Enumeration to store client state
 enum ClientState {
     Connected,
     WaitingOnOpponent(String),
-    GamePending,
     GameInProgress(String, Token),
 }
 
 fn main () {
     // Used to store the sockets.
     let mut sockets = HashMap::new();
-    let mut tls_servers = HashMap::new();
+    let mut tls_servers = HashMap::<Token, ServerSession>::new();
+    let mut games = Vec::<GameData>::new();
 
     // Used to store client status
     let mut client_status: HashMap<Token, ClientState> = HashMap::new();
@@ -110,16 +112,16 @@ fn main () {
                                 // Process packets
                                 match tls_servers.get_mut(&token).unwrap().process_new_packets() {
                                     Ok(_) => {
-                                        let mut plaintext = Vec::new();
+                                        let mut plaintext = Vec::<u8>::new();
                                         match tls_servers.get_mut(&token).unwrap().read_to_end(&mut plaintext) {
                                             Ok(0) => (),
                                             Ok(n) => {
                                                 println!("read_to_end: {}", n);
                                                 println!("Got a string length: {}", plaintext.len());
                                                 // Echo everything to stdout
-                                                match str::from_utf8(&plaintext[..]) {
-                                                    Ok(v) => {
-                                                        println!("{}", v);
+                                                match String::from_utf8(plaintext) {
+                                                    Ok(mut v) => {
+                                                        println!("{}: {:?}", v, v.clone().into_bytes());
 
                                                         // Got a string from the client, process it
                                                         // based on the client state
@@ -129,7 +131,7 @@ fn main () {
                                                                 // Update client status to
                                                                 // WaitingOnOpponent
                                                                 *client_status.get_mut(&token).unwrap() =
-                                                                    ClientState::WaitingOnOpponent(v.trim().to_string());
+                                                                    ClientState::WaitingOnOpponent(v);
 
                                                             },
                                                             ClientState::WaitingOnOpponent(name) => {
@@ -147,8 +149,19 @@ fn main () {
                                                                 // forward packet from sender
                                                                 println!("Send string to partner");
                                                                 tls_servers.get_mut(&partner_token).unwrap().write(v.as_bytes()).unwrap();
+
+                                                                // Get the game data
+                                                                if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(name)) {
+                                                                    // Parse the player move
+                                                                    match v.split_off(2).parse::<usize>() {
+                                                                        Ok(player_move) => {
+                                                                            // make the player move
+                                                                            game_data.move_player(name, player_move);
+                                                                        },
+                                                                        Err(e) => { println!("Error parsing '{}': {}", v, e); }
+                                                                    }
+                                                                }
                                                             },
-                                                            _ => (),
                                                         }
 
                                                     }
@@ -230,11 +243,20 @@ fn main () {
                             // Have two clients to match up in a game
                             // Update client status
                             if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
-                                *partner1_status = ClientState::GameInProgress(partner1_name, partner2_token);
+                                *partner1_status = ClientState::GameInProgress(partner1_name.to_string(), partner2_token);
                             }
                             if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
-                                *partner2_status = ClientState::GameInProgress(partner2_name, partner1_token);
+                                *partner2_status = ClientState::GameInProgress(partner2_name.to_string(), partner1_token);
                             }
+
+                            // Build a new Game object
+                            let mut game_data = GameData::new(2, 3, 10);
+                            game_data.add_player(&partner1_name);
+                            game_data.add_player(&partner2_name);
+
+                            // Add the Game object to the global store
+                            games.push(game_data);
+
                         }
                     }
 

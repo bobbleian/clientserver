@@ -49,6 +49,7 @@ fn main () {
                             if user_name.is_empty() {
                                 user_name = buffer.clone().trim().to_string();
                             }
+                            buffer = buffer.trim().to_string();
                             tx.send(buffer).unwrap();
                         },
                         Err(err) => {
