@@ -7,6 +7,7 @@ use log::{debug, info, warn};
 use mio::{Events, Poll, Ready, PollOpt, Token, net::TcpStream};
 
 use rustls::{ClientSession,Session};
+use console::Term;
 
 const TALKER: Token = mio::Token(0);
 
@@ -21,7 +22,10 @@ fn main () {
     let example_com = webpki::DNSNameRef::try_from_ascii_str("localhost").unwrap();
     let mut client = ClientSession::new(&rc_config, example_com);
 
+    let mut game_board = Vec::<u8>::new();
+
     let poll = Poll::new().unwrap();
+
 
 
     let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
@@ -31,24 +35,13 @@ fn main () {
             let (tx, rx) = mpsc::channel();
 
             thread::spawn(move || {
-                let mut user_name = String::new();
                 loop {
                     let stdin = io::stdin();
                     let mut buffer = String::new();
 
-                    // Display user-prompt
-                    if user_name.is_empty() {
-                        print!("Please enter user name: ");
-                    } else {
-                        print!("> ");
-                    }
-                    io::stdout().flush().unwrap();
 
                     match stdin.read_line(&mut buffer) {
                         Ok(_n) => {
-                            if user_name.is_empty() {
-                                user_name = buffer.clone().trim().to_string();
-                            }
                             buffer = buffer.trim().to_string();
                             tx.send(buffer).unwrap();
                         },
@@ -64,7 +57,26 @@ fn main () {
             poll.register(&stream, TALKER, Ready::readable() | Ready::writable(), PollOpt::level() | PollOpt::oneshot()).unwrap();
             let mut events = Events::with_capacity(1024);
 
+            let mut user_name = String::new();
+            let mut update_user_prompt = true;
+
             'outer: loop {
+
+                // Display user-prompt
+                if update_user_prompt {
+                    if user_name.is_empty() {
+                        print!("Please enter user name: ");
+                    } else {
+                        // Echo board to stdout
+                        let term = Term::stdout();
+                        term.clear_screen().unwrap();
+                        println!("Player: {}", user_name);
+                        println!("Game Board: {:?} ", game_board.as_slice());
+                        print!("> ");
+                    }
+                    io::stdout().flush().unwrap();
+                    update_user_prompt = false;
+                }
 
                 // See if we have any user input from the reader thread
                 match rx.try_recv() {
@@ -79,6 +91,9 @@ fn main () {
                             Ok(n) => debug!("client wrote {} bytes", n),
                             Err(e) => panic!(e),
                         }
+                            if user_name.is_empty() {
+                                user_name = buffer.clone().trim().to_string();
+                            }
                     },
                     Err(_) => {
                         // Expected most of the time
@@ -134,10 +149,16 @@ fn main () {
                                 Ok(1) => unreachable!(),
                                 Ok(n) => {
                                     debug!("read_to_end: {}", n);
-                                    debug!("Got a data length: {}", data.len());
+                                    debug!("Got a data: {:?}", data);
 
                                     // process the data
-                                    process_server_data(data[0], data[1], &data[2..data.len()]);
+                                    let mut i = 0;
+                                    while i < data.len() {
+                                        process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], &mut game_board);
+                                        i = i + 2 + data[i+1] as usize;
+                                        debug!("Incremented i: {}", i);
+                                    }
+                                    update_user_prompt = true;
                                 },
                                 Err(e) => panic!(e),
                             }
@@ -168,8 +189,8 @@ fn main () {
 }
 
 
-fn process_server_data(control_byte: u8, data_len: u8, data: &[u8]) {
-    info!("Processing [control_byte: {}; data_len: {}]", control_byte, data_len);
+fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_board: &mut Vec<u8>) {
+    println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
         // 0: Opponent has disconnected
         0 => {
@@ -197,6 +218,12 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8]) {
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
+        },
+
+        // 3: Game Board update
+        3 => {
+            game_board.clear();
+            game_board.extend_from_slice(data);
         },
 
         // Unknown control byte; do nothing?

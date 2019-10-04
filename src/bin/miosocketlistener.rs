@@ -153,10 +153,20 @@ fn main () {
                                                                 // Get the game data
                                                                 if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(name)) {
                                                                     // Parse the player move
-                                                                    match v.split_off(2).parse::<usize>() {
+                                                                    match v.split_off(2).parse::<u8>() {
                                                                         Ok(player_move) => {
                                                                             // make the player move
                                                                             game_data.move_player(name, player_move);
+
+                                                                            // send the game board
+                                                                let game_board = game_data.get_game_board();
+                                                                            println!("Sending board update: {:?}", game_board);
+                                                                let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
+                                                                s_data.push(3);
+                                                                s_data.push(game_board.len() as u8);
+                                                                s_data.extend_from_slice(&game_board[..]);
+                                                                tls_servers.get_mut(&partner_token).unwrap().write(&s_data).unwrap();
+                                                                tls_servers.get_mut(&token).unwrap().write(&s_data).unwrap();
                                                                         },
                                                                         Err(e) => { println!("Error parsing '{}': {}", v, e); }
                                                                     }
