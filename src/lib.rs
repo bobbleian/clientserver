@@ -107,7 +107,7 @@ impl GameState for WaitingOnMove {
         }
 
         // Check the player is making a valid move
-        if player_move > game_data.max_move {
+        if player_move > game_data.max_move || player_move < 1 {
             println!("Invalid move {}; max move is {}", player_move, game_data.max_move);
             return self;
         }

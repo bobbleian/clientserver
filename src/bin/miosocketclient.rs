@@ -72,6 +72,7 @@ fn main () {
                         term.clear_screen().unwrap();
                         println!("Player: {}", user_name);
                         println!("Game Board: {:?} ", game_board.as_slice());
+                        println!("Game Total: {} ", game_board.len());
                         print!("> ");
                     }
                     io::stdout().flush().unwrap();
@@ -91,9 +92,10 @@ fn main () {
                             Ok(n) => debug!("client wrote {} bytes", n),
                             Err(e) => panic!(e),
                         }
-                            if user_name.is_empty() {
-                                user_name = buffer.clone().trim().to_string();
-                            }
+                        if user_name.is_empty() {
+                            user_name = buffer.clone().trim().to_string();
+                        }
+                        update_user_prompt = true;
                     },
                     Err(_) => {
                         // Expected most of the time
