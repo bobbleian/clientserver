@@ -16,7 +16,8 @@ use clientserver::game::GameData;
 
 use slab::Slab;
 
-const LISTENER: Token = Token(1024);
+const MAX_SOCKETS: usize = 1024;
+const LISTENER: Token = Token(MAX_SOCKETS);
 
 // Enumeration to store client state
 enum ClientState {
@@ -27,9 +28,9 @@ enum ClientState {
 
 fn main () {
     // Used to store the sockets.
-    let mut sockets = Slab::<TcpStream>::new();
-    let mut tls_servers = HashMap::<Token, ServerSession>::new();
-    let mut games = Vec::<GameData>::new();
+    let mut sockets: Slab<TcpStream> = Slab::with_capacity(MAX_SOCKETS);
+    let mut tls_servers: HashMap<Token, ServerSession> = HashMap::new();
+    let mut games: Vec<GameData> = Vec::new();
 
     // Used to store client status
     let mut client_status: HashMap<Token, ClientState> = HashMap::new();
@@ -59,6 +60,13 @@ fn main () {
                     match listener.accept() {
                         Ok((socket, addr)) => {
                             println!("Accepting new connection from {:?}", addr);
+                            // check max connections
+                            if sockets.len() >= MAX_SOCKETS {
+                                println!("Max connections reached {}" , MAX_SOCKETS);
+                                socket.shutdown(net::Shutdown::Both).unwrap();
+                                break;
+                            }
+
                             let socket_entry = sockets.vacant_entry();
                             let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
