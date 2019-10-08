@@ -5,16 +5,18 @@ use std::collections::{HashMap};
 use std::sync::{Arc};
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
-use mio::net::{TcpListener};
+use mio::net::{TcpListener, TcpStream};
 
 use log::{debug};
 
 use rustls;
 use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
 
-use clientserver::GameData;
+use clientserver::game::GameData;
 
-const LISTENER: Token = Token(0);
+use slab::Slab;
+
+const LISTENER: Token = Token(1024);
 
 // Enumeration to store client state
 enum ClientState {
@@ -25,7 +27,7 @@ enum ClientState {
 
 fn main () {
     // Used to store the sockets.
-    let mut sockets = HashMap::new();
+    let mut sockets = Slab::<TcpStream>::new();
     let mut tls_servers = HashMap::<Token, ServerSession>::new();
     let mut games = Vec::<GameData>::new();
 
@@ -57,9 +59,10 @@ fn main () {
                     match listener.accept() {
                         Ok((socket, addr)) => {
                             println!("Accepting new connection from {:?}", addr);
-                            let token = Token(usize::from(addr.port()));
+                            let socket_entry = sockets.vacant_entry();
+                            let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
-                            sockets.insert(token, socket);
+                            socket_entry.insert(socket);
                             tls_servers.insert(token, ServerSession::new(&rc_config));
                             client_status.insert(token, ClientState::Connected);
                         },
@@ -73,7 +76,7 @@ fn main () {
                 token => {
                     //println!("Got a token");
                     if event.readiness().is_readable() && tls_servers.get_mut(&token).unwrap().wants_read() {
-                        match tls_servers.get_mut(&token).unwrap().read_tls(sockets.get_mut(&token).unwrap()) {
+                        match tls_servers.get_mut(&token).unwrap().read_tls(sockets.get_mut(usize::from(token)).unwrap()) {
                             Ok(0) => {
                                 // Client disconnected, find partner client if it exists
                                 let mut partner_token: Option<Token> = None;
@@ -102,8 +105,8 @@ fn main () {
 
                                 // Socket is closed
                                 println!("Socket closed");
-                                poll.deregister(sockets.get(&token).unwrap()).unwrap();
-                                sockets.remove(&token);
+                                poll.deregister(sockets.get(usize::from(token)).unwrap()).unwrap();
+                                sockets.remove(usize::from(token));
                                 client_status.remove(&token);
                                 break;
                             }
@@ -191,8 +194,8 @@ fn main () {
                             Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
                                 // Socket is not ready anymore, stop reading
                                 println!("Connection reset breaking");
-                                poll.deregister(sockets.get(&token).unwrap()).unwrap();
-                                sockets.remove(&token);
+                                poll.deregister(sockets.get(usize::from(token)).unwrap()).unwrap();
+                                sockets.remove(usize::from(token));
                                 break;
                             }
                             e => panic!("err={:?}", e), // Unexpected error
@@ -201,7 +204,7 @@ fn main () {
 
                     if event.readiness().is_writable() && tls_servers.get_mut(&token).unwrap().wants_write() {
 
-                        match tls_servers.get_mut(&token).unwrap().write_tls(sockets.get_mut(&token).unwrap()) {
+                        match tls_servers.get_mut(&token).unwrap().write_tls(sockets.get_mut(usize::from(token)).unwrap()) {
                             Ok(size) => {
                                 println!("Wrote {} bytes", size);
                             }
