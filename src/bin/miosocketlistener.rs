@@ -26,10 +26,14 @@ enum ClientState {
     GameInProgress(String, Token),
 }
 
+struct SocketData {
+    socket: TcpStream,
+    session: ServerSession,
+}
+
 fn main () {
     // Used to store the sockets.
-    let mut sockets: Slab<TcpStream> = Slab::with_capacity(MAX_SOCKETS);
-    let mut tls_servers: HashMap<Token, ServerSession> = HashMap::new();
+    let mut sockets: Slab<SocketData> = Slab::with_capacity(MAX_SOCKETS);
     let mut games: Vec<GameData> = Vec::new();
 
     // Used to store client status
@@ -41,7 +45,6 @@ fn main () {
     let privkey = load_private_key("/home/ianc/rootPrivkey.pem");
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
     let rc_config = Arc::new(config);
-    //let mut server = ServerSession::new(&rc_config);
 
     let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
@@ -51,7 +54,11 @@ fn main () {
 
     poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level()).unwrap();
 
+    // Outgoing message queue
+    let message_queue = &mut Vec::new();
+
     loop {
+
         poll.poll(&mut events, None).unwrap();
 
         for event in &events {
@@ -70,8 +77,7 @@ fn main () {
                             let socket_entry = sockets.vacant_entry();
                             let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
-                            socket_entry.insert(socket);
-                            tls_servers.insert(token, ServerSession::new(&rc_config));
+                            socket_entry.insert(SocketData{socket: socket, session: ServerSession::new(&rc_config)});
                             client_status.insert(token, ClientState::Connected);
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -83,8 +89,9 @@ fn main () {
                 },
                 token => {
                     //println!("Got a token");
-                    if event.readiness().is_readable() && tls_servers.get_mut(&token).unwrap().wants_read() {
-                        match tls_servers.get_mut(&token).unwrap().read_tls(sockets.get_mut(usize::from(token)).unwrap()) {
+                    let socket_data = &mut sockets.get_mut(usize::from(token)).unwrap();
+                    if event.readiness().is_readable() && socket_data.session.wants_read() {
+                        match socket_data.session.read_tls(&mut socket_data.socket) {
                             Ok(0) => {
                                 // Client disconnected, find partner client if it exists
                                 let mut partner_token: Option<Token> = None;
@@ -104,7 +111,7 @@ fn main () {
                                         ClientState::GameInProgress(partner_name, _token) => {
                                             println!("Client disconnected, update partner: {}", partner_name);
                                             let staged_data: [u8; 2] = [0, 0];
-                                            tls_servers.get_mut(&partner_token).unwrap().write(&staged_data).unwrap();
+                                            sockets.get_mut(usize::from(partner_token)).unwrap().session.write(&staged_data).unwrap();
                                             *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent(partner_name.to_string());
                                         },
                                         _ => unreachable!(),
@@ -113,7 +120,7 @@ fn main () {
 
                                 // Socket is closed
                                 println!("Socket closed");
-                                poll.deregister(sockets.get(usize::from(token)).unwrap()).unwrap();
+                                poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
                                 sockets.remove(usize::from(token));
                                 client_status.remove(&token);
                                 break;
@@ -121,10 +128,10 @@ fn main () {
                             Ok(n) => {
                                 println!("read_tls: {} bytes", n);
                                 // Process packets
-                                match tls_servers.get_mut(&token).unwrap().process_new_packets() {
+                                match socket_data.session.process_new_packets() {
                                     Ok(_) => {
                                         let mut plaintext = Vec::<u8>::new();
-                                        match tls_servers.get_mut(&token).unwrap().read_to_end(&mut plaintext) {
+                                        match socket_data.session.read_to_end(&mut plaintext) {
                                             Ok(0) => (),
                                             Ok(n) => {
                                                 println!("read_to_end: {}", n);
@@ -155,11 +162,11 @@ fn main () {
                                                                 staged_data.push(2);
                                                                 staged_data.push(buffer_data.len() as u8);
                                                                 staged_data.extend_from_slice(&buffer_data[..]);
-                                                                tls_servers.get_mut(&partner_token).unwrap().write(&staged_data).unwrap();
+                                                                message_queue.push((usize::from(*partner_token), staged_data.clone()));
 
                                                                 // forward packet from sender
                                                                 println!("Send string to partner");
-                                                                tls_servers.get_mut(&partner_token).unwrap().write(v.as_bytes()).unwrap();
+                                                                message_queue.push((usize::from(*partner_token), v.as_bytes().to_vec()));
 
                                                                 // Get the game data
                                                                 if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(name)) {
@@ -176,8 +183,8 @@ fn main () {
                                                                 s_data.push(3);
                                                                 s_data.push(game_board.len() as u8);
                                                                 s_data.extend_from_slice(&game_board[..]);
-                                                                tls_servers.get_mut(&partner_token).unwrap().write(&s_data).unwrap();
-                                                                tls_servers.get_mut(&token).unwrap().write(&s_data).unwrap();
+                                                                message_queue.push((usize::from(*partner_token), s_data.clone()));
+                                                                message_queue.push((usize::from(token), s_data.clone()));
                                                                         },
                                                                         Err(e) => { println!("Error parsing '{}': {}", v, e); }
                                                                     }
@@ -202,7 +209,7 @@ fn main () {
                             Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
                                 // Socket is not ready anymore, stop reading
                                 println!("Connection reset breaking");
-                                poll.deregister(sockets.get(usize::from(token)).unwrap()).unwrap();
+                                poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
                                 sockets.remove(usize::from(token));
                                 break;
                             }
@@ -210,9 +217,9 @@ fn main () {
                         }
                     }
 
-                    if event.readiness().is_writable() && tls_servers.get_mut(&token).unwrap().wants_write() {
+                    if event.readiness().is_writable() && socket_data.session.wants_write() {
 
-                        match tls_servers.get_mut(&token).unwrap().write_tls(sockets.get_mut(usize::from(token)).unwrap()) {
+                        match socket_data.session.write_tls(&mut socket_data.socket) {
                             Ok(size) => {
                                 println!("Wrote {} bytes", size);
                             }
@@ -280,6 +287,13 @@ fn main () {
 
                         }
                     }
+
+                    // Clear out message queue
+                    message_queue.retain(|message| {
+                        println!("Message: [token={}; data={:?}", message.0, message.1);
+                        sockets.get_mut(message.0).unwrap().session.write(message.1.as_slice()).unwrap();
+                        false
+                    });
 
                 },
             }
