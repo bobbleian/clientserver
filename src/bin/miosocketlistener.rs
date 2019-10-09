@@ -22,8 +22,8 @@ const LISTENER: Token = Token(MAX_SOCKETS);
 // Enumeration to store client state
 enum ClientState {
     Connected,
-    WaitingOnOpponent(String),
-    GameInProgress(String, Token),
+    WaitingOnOpponent,
+    GameInProgress(Token),
 }
 
 struct SocketData {
@@ -98,7 +98,7 @@ fn main () {
                                 // Client disconnected, find partner client if it exists
                                 let mut partner_token: Option<Token> = None;
                                 match client_status.get(&token).unwrap() {
-                                    ClientState::GameInProgress(_name, temp_partner_token) => {
+                                    ClientState::GameInProgress(temp_partner_token) => {
                                         partner_token = Some(*temp_partner_token);
                                     },
                                     _ => (),
@@ -110,12 +110,12 @@ fn main () {
                                 // Clean up state of partner if necessary
                                 if let Some(partner_token) = partner_token {
                                     match client_status.get(&partner_token).unwrap() {
-                                        ClientState::GameInProgress(partner_name, _token) => {
-                                            println!("Client disconnected, update partner: {}", partner_name);
+                                        ClientState::GameInProgress(_token) => {
+                                            println!("Client disconnected, update partner");
                                             let staged_data: [u8; 2] = [0, 0];
                                             sockets.get_mut(usize::from(partner_token)).unwrap().session.write(&staged_data).unwrap();
-                                            sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent(partner_name.to_string());
-                                            *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent(partner_name.to_string());
+                                            sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent;
+                                            *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent;
                                         },
                                         _ => unreachable!(),
                                     }
@@ -152,16 +152,17 @@ fn main () {
                                                                 // Update client status to
                                                                 // WaitingOnOpponent
                                                                 *client_status.get_mut(&token).unwrap() =
-                                                                    ClientState::WaitingOnOpponent(v.to_string());
-                                                                socket_data.state = ClientState::WaitingOnOpponent(v);
+                                                                    ClientState::WaitingOnOpponent;
+                                                                socket_data.state = ClientState::WaitingOnOpponent;
+                                                                socket_data.player_name = v.to_string();
 
                                                             },
-                                                            ClientState::WaitingOnOpponent(name) => {
-                                                                println!("Still waiting on opponent for client: {}", name);
+                                                            ClientState::WaitingOnOpponent => {
+                                                                println!("Still waiting on opponent for client: {:?}", token);
                                                             },
-                                                            ClientState::GameInProgress(name, partner_token) => {
+                                                            ClientState::GameInProgress(partner_token) => {
                                                                 // send name to partner
-                                                                let buffer_data = name.as_bytes();
+                                                                let buffer_data = socket_data.player_name.as_bytes();
                                                                 let mut staged_data: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
                                                                 staged_data.push(2);
                                                                 staged_data.push(buffer_data.len() as u8);
@@ -245,22 +246,18 @@ fn main () {
                     // clients we could start a game
                     // with
                     let mut partner1_token: Option<Token> = None;
-                    let mut partner1_name = String::new();
                     let mut partner2_token: Option<Token> = None;
-                    let mut partner2_name = String::new();
                     for (check_token, check_status) in client_status.iter() {
                         match check_status {
-                            ClientState::WaitingOnOpponent(name) => {
+                            ClientState::WaitingOnOpponent => {
                                 // Found a client waiting for an opponent
                                 if partner1_token == None {
-                                    debug!("Found first client who is waiting for a game: {}", name);
+                                    debug!("Found first client who is waiting for a game");
                                     partner1_token = Some(*check_token);
-                                    partner1_name = name.to_string();
                                     continue;
                                 } else if partner2_token == None {
-                                    debug!("Found second client who is waiting for a game: {}", name);
+                                    debug!("Found second client who is waiting for a game");
                                     partner2_token = Some(*check_token);
-                                    partner2_name = name.to_string();
                                     break;
                                 } else {
                                     unreachable!();
@@ -273,14 +270,16 @@ fn main () {
                     if let Some(partner1_token) = partner1_token {
                         if let Some(partner2_token) = partner2_token {
                             // Have two clients to match up in a game
+                            let partner1_name = sockets.get_mut(usize::from(partner1_token)).unwrap().player_name.to_string();
+                            let partner2_name = sockets.get_mut(usize::from(partner2_token)).unwrap().player_name.to_string();
                             // Update client status
                             if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
-                                *partner1_status = ClientState::GameInProgress(partner1_name.to_string(), partner2_token);
-                                sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner1_name.to_string(),partner2_token);
+                                *partner1_status = ClientState::GameInProgress(partner2_token);
+                                sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner2_token);
                             }
                             if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
-                                *partner2_status = ClientState::GameInProgress(partner2_name.to_string(), partner1_token);
-                                sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner2_name.to_string(),partner1_token);
+                                *partner2_status = ClientState::GameInProgress(partner1_token);
+                                sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner1_token);
                             }
 
                             // Build a new Game object

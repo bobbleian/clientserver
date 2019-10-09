@@ -67,6 +67,7 @@ struct GameOver {
 
 impl GameState for WaitingForPlayers {
     fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState> {
+        println!("Adding player_id={}; player_name={}", player_id, player_name);
         game_data.player_names.push(player_name.to_string());
         game_data.player_ids.push(player_id);
         if game_data.player_names.len() as u8 >= game_data.max_players {
