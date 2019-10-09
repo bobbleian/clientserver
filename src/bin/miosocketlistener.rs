@@ -117,6 +117,9 @@ fn main () {
                                 sockets.remove(usize::from(token));
 
                                 // TODO Remove/Update GameData
+                                games.retain(|game| {
+                                    !game.game_has_player(usize::from(token))
+                                });
                                 break;
                             }
                             Ok(n) => {
