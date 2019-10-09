@@ -1,7 +1,6 @@
 use std::{str,fs};
 use std::io::{self, Read, Write, BufReader};
 use std::net;
-use std::collections::{HashMap};
 use std::sync::{Arc};
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
@@ -37,9 +36,6 @@ fn main () {
     // Used to store the sockets.
     let mut sockets: Slab<SocketData> = Slab::with_capacity(MAX_SOCKETS);
     let mut games: Vec<GameData> = Vec::new();
-
-    // Used to store client status
-    let mut client_status: HashMap<Token, ClientState> = HashMap::new();
 
     // rustls configuration
     let mut config = ServerConfig::new(NoClientAuth::new());
@@ -80,7 +76,6 @@ fn main () {
                             let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
                             socket_entry.insert(SocketData{player_name: String::from(""), socket: socket, session: ServerSession::new(&rc_config), state: ClientState::Connected});
-                            client_status.insert(token, ClientState::Connected);
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             println!("Listening socket would block");
@@ -104,18 +99,13 @@ fn main () {
                                     _ => (),
                                 }
 
-                                // Current client no longer has status
-                                client_status.remove(&token);
-
                                 // Clean up state of partner if necessary
                                 if let Some(partner_token) = partner_token {
-                                    //match client_status.get(&partner_token).unwrap() {
                                     match sockets.get(usize::from(partner_token)).unwrap().state {
                                         ClientState::GameInProgress(_token) => {
                                             println!("Client disconnected, update partner");
                                             message_queue.push((usize::from(partner_token), [0, 0].to_vec()));
                                             sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent;
-                                            *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent;
                                         },
                                         _ => unreachable!(),
                                     }
@@ -125,7 +115,8 @@ fn main () {
                                 println!("Socket closed");
                                 poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
                                 sockets.remove(usize::from(token));
-                                client_status.remove(&token);
+
+                                // TODO Remove/Update GameData
                                 break;
                             }
                             Ok(n) => {
@@ -146,14 +137,11 @@ fn main () {
 
                                                         // Got a string from the client, process it
                                                         // based on the client state
-                                                        //match client_status.get(&token).unwrap() {
                                                         match socket_data.state {
                                                             ClientState::Connected => {
                                                                 println!("Got client name, now WaitingOnOpponent");
                                                                 // Update client status to
                                                                 // WaitingOnOpponent
-                                                                *client_status.get_mut(&token).unwrap() =
-                                                                    ClientState::WaitingOnOpponent;
                                                                 socket_data.state = ClientState::WaitingOnOpponent;
                                                                 socket_data.player_name = v.to_string();
 
@@ -248,7 +236,6 @@ fn main () {
                     // with
                     let mut partner1_token: Option<Token> = None;
                     let mut partner2_token: Option<Token> = None;
-                    //for (check_token, check_status) in client_status.iter() {
                     for (check_token, check_socket_data) in sockets.iter() {
                         match check_socket_data.state {
                             ClientState::WaitingOnOpponent => {
@@ -274,15 +261,10 @@ fn main () {
                             // Have two clients to match up in a game
                             let partner1_name = sockets.get_mut(usize::from(partner1_token)).unwrap().player_name.to_string();
                             let partner2_name = sockets.get_mut(usize::from(partner2_token)).unwrap().player_name.to_string();
+
+                            // Update client status
                             sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner2_token);
                             sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner1_token);
-                            // Update client status
-                            if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
-                                *partner1_status = ClientState::GameInProgress(partner2_token);
-                            }
-                            if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
-                                *partner2_status = ClientState::GameInProgress(partner1_token);
-                            }
 
                             // Build a new Game object
                             let mut game_data = GameData::new(2, 3, 10);
