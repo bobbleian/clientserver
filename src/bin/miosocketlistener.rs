@@ -27,8 +27,10 @@ enum ClientState {
 }
 
 struct SocketData {
+    player_name: String,
     socket: TcpStream,
     session: ServerSession,
+    state: ClientState,
 }
 
 fn main () {
@@ -77,7 +79,7 @@ fn main () {
                             let socket_entry = sockets.vacant_entry();
                             let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
-                            socket_entry.insert(SocketData{socket: socket, session: ServerSession::new(&rc_config)});
+                            socket_entry.insert(SocketData{player_name: String::from(""), socket: socket, session: ServerSession::new(&rc_config), state: ClientState::Connected});
                             client_status.insert(token, ClientState::Connected);
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -112,6 +114,7 @@ fn main () {
                                             println!("Client disconnected, update partner: {}", partner_name);
                                             let staged_data: [u8; 2] = [0, 0];
                                             sockets.get_mut(usize::from(partner_token)).unwrap().session.write(&staged_data).unwrap();
+                                            sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent(partner_name.to_string());
                                             *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent(partner_name.to_string());
                                         },
                                         _ => unreachable!(),
@@ -149,7 +152,8 @@ fn main () {
                                                                 // Update client status to
                                                                 // WaitingOnOpponent
                                                                 *client_status.get_mut(&token).unwrap() =
-                                                                    ClientState::WaitingOnOpponent(v);
+                                                                    ClientState::WaitingOnOpponent(v.to_string());
+                                                                socket_data.state = ClientState::WaitingOnOpponent(v);
 
                                                             },
                                                             ClientState::WaitingOnOpponent(name) => {
@@ -169,12 +173,12 @@ fn main () {
                                                                 message_queue.push((usize::from(*partner_token), v.as_bytes().to_vec()));
 
                                                                 // Get the game data
-                                                                if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(name)) {
+                                                                if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
                                                                     // Parse the player move
                                                                     match v.split_off(2).parse::<u8>() {
                                                                         Ok(player_move) => {
                                                                             // make the player move
-                                                                            game_data.move_player(name, player_move);
+                                                                            game_data.move_player(usize::from(token), player_move);
 
                                                                             // send the game board
                                                                 let game_board = game_data.get_game_board();
@@ -272,15 +276,17 @@ fn main () {
                             // Update client status
                             if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
                                 *partner1_status = ClientState::GameInProgress(partner1_name.to_string(), partner2_token);
+                                sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner1_name.to_string(),partner2_token);
                             }
                             if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
                                 *partner2_status = ClientState::GameInProgress(partner2_name.to_string(), partner1_token);
+                                sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner2_name.to_string(),partner1_token);
                             }
 
                             // Build a new Game object
                             let mut game_data = GameData::new(2, 3, 10);
-                            game_data.add_player(&partner1_name);
-                            game_data.add_player(&partner2_name);
+                            game_data.add_player(usize::from(partner1_token), &partner1_name);
+                            game_data.add_player(usize::from(partner2_token), &partner2_name);
 
                             // Add the Game object to the global store
                             games.push(game_data);

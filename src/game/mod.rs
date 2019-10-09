@@ -1,5 +1,6 @@
 pub struct GameData {
     player_names: Vec<String>,
+    player_ids: Vec<usize>,
     game_board: Vec<u8>,
     active_player: u8,
     max_players: u8,
@@ -12,6 +13,7 @@ impl GameData {
     pub fn new(max_players: u8, max_move: u8, game_board_size: u8) -> GameData {
         GameData {
             player_names: Vec::new(),
+            player_ids: Vec::<usize>::new(),
             game_board: Vec::new(),
             active_player: std::u8::MAX,
             max_players: max_players,
@@ -21,33 +23,25 @@ impl GameData {
         }
     }
 
-    pub fn add_player(&mut self, player_name: &str) {
+    pub fn add_player(&mut self, player_id: usize, player_name: &str) {
         if let Some(s) = self.state.take() {
-            self.state = Some(s.add_player(self, player_name));
+            self.state = Some(s.add_player(self, player_id, player_name));
         }
     }
 
-    pub fn move_player(&mut self, player_name: &String, player_move: u8) {
-        println!("Moving player {} {} steps", player_name, player_move);
-        if let Some(player) = self.player_names.iter().position(|name| name == player_name) {
+    pub fn move_player(&mut self, player_id: usize, player_move: u8) {
+        println!("Moving player {} {} steps", player_id, player_move);
+        if let Some(player) = self.player_ids.iter().position(|id| *id == player_id) {
             if let Some(s) = self.state.take() {
                 self.state = Some(s.move_player(self, player as u8, player_move));
             }
         } else {
-            panic!("Cannot find player: {}", player_name);
+            panic!("Cannot find player: {}", player_id);
         }
     }
 
-    pub fn get_player_name(&self, player: u8) -> Option<String> {
-        if let Some(player_name) = self.player_names.get(player as usize) {
-            Some(player_name.to_string())
-        } else {
-            None
-        }
-    }
-
-    pub fn game_has_player(&self, player_name: &String) -> bool {
-        self.player_names.contains(player_name)
+    pub fn game_has_player(&self, player_id: usize) -> bool {
+        self.player_ids.contains(&player_id)
     }
 
     pub fn get_game_board(&self) -> &[u8] {
@@ -57,7 +51,7 @@ impl GameData {
 }
 
 trait GameState {
-    fn add_player(self: Box<Self>, game_data: &mut GameData, player_name: &str) -> Box<dyn GameState>;
+    fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState>;
     fn move_player(self: Box<Self>, game_data: &mut GameData, player: u8, player_move: u8) -> Box<dyn GameState>;
     fn is_game_over() -> bool where Self: Sized { return false; }
 }
@@ -72,8 +66,9 @@ struct GameOver {
 }
 
 impl GameState for WaitingForPlayers {
-    fn add_player(self: Box<Self>, game_data: &mut GameData, player_name: &str) -> Box<dyn GameState> {
+    fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState> {
         game_data.player_names.push(player_name.to_string());
+        game_data.player_ids.push(player_id);
         if game_data.player_names.len() as u8 >= game_data.max_players {
             // Randomly select an active player
             game_data.active_player = 0;
@@ -94,7 +89,7 @@ impl GameState for WaitingForPlayers {
 
 impl GameState for WaitingOnMove {
     // Empty implementation
-    fn add_player(self: Box<Self>, _game_data: &mut GameData, _player_name: &str) -> Box<dyn GameState> {
+    fn add_player(self: Box<Self>, _game_data: &mut GameData, _player_id: usize, _player_name: &str) -> Box<dyn GameState> {
         self
     }
 
@@ -133,7 +128,7 @@ impl GameState for WaitingOnMove {
 }
 
 impl GameState for GameOver {
-    fn add_player(self: Box<Self>, _game_data: &mut GameData, _player_name: &str) -> Box<dyn GameState> {
+    fn add_player(self: Box<Self>, _game_data: &mut GameData, _player_id: usize, _player_name: &str) -> Box<dyn GameState> {
         self
     }
 
