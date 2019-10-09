@@ -97,9 +97,9 @@ fn main () {
                             Ok(0) => {
                                 // Client disconnected, find partner client if it exists
                                 let mut partner_token: Option<Token> = None;
-                                match client_status.get(&token).unwrap() {
+                                match socket_data.state {
                                     ClientState::GameInProgress(temp_partner_token) => {
-                                        partner_token = Some(*temp_partner_token);
+                                        partner_token = Some(temp_partner_token);
                                     },
                                     _ => (),
                                 }
@@ -109,11 +109,11 @@ fn main () {
 
                                 // Clean up state of partner if necessary
                                 if let Some(partner_token) = partner_token {
-                                    match client_status.get(&partner_token).unwrap() {
+                                    //match client_status.get(&partner_token).unwrap() {
+                                    match sockets.get(usize::from(partner_token)).unwrap().state {
                                         ClientState::GameInProgress(_token) => {
                                             println!("Client disconnected, update partner");
-                                            let staged_data: [u8; 2] = [0, 0];
-                                            sockets.get_mut(usize::from(partner_token)).unwrap().session.write(&staged_data).unwrap();
+                                            message_queue.push((usize::from(partner_token), [0, 0].to_vec()));
                                             sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent;
                                             *client_status.get_mut(&partner_token).unwrap() = ClientState::WaitingOnOpponent;
                                         },
@@ -146,7 +146,8 @@ fn main () {
 
                                                         // Got a string from the client, process it
                                                         // based on the client state
-                                                        match client_status.get(&token).unwrap() {
+                                                        //match client_status.get(&token).unwrap() {
+                                                        match socket_data.state {
                                                             ClientState::Connected => {
                                                                 println!("Got client name, now WaitingOnOpponent");
                                                                 // Update client status to
@@ -167,11 +168,11 @@ fn main () {
                                                                 staged_data.push(2);
                                                                 staged_data.push(buffer_data.len() as u8);
                                                                 staged_data.extend_from_slice(&buffer_data[..]);
-                                                                message_queue.push((usize::from(*partner_token), staged_data.clone()));
+                                                                message_queue.push((usize::from(partner_token), staged_data.clone()));
 
                                                                 // forward packet from sender
                                                                 println!("Send string to partner");
-                                                                message_queue.push((usize::from(*partner_token), v.as_bytes().to_vec()));
+                                                                message_queue.push((usize::from(partner_token), v.as_bytes().to_vec()));
 
                                                                 // Get the game data
                                                                 if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
@@ -188,7 +189,7 @@ fn main () {
                                                                 s_data.push(3);
                                                                 s_data.push(game_board.len() as u8);
                                                                 s_data.extend_from_slice(&game_board[..]);
-                                                                message_queue.push((usize::from(*partner_token), s_data.clone()));
+                                                                message_queue.push((usize::from(partner_token), s_data.clone()));
                                                                 message_queue.push((usize::from(token), s_data.clone()));
                                                                         },
                                                                         Err(e) => { println!("Error parsing '{}': {}", v, e); }
@@ -247,17 +248,18 @@ fn main () {
                     // with
                     let mut partner1_token: Option<Token> = None;
                     let mut partner2_token: Option<Token> = None;
-                    for (check_token, check_status) in client_status.iter() {
-                        match check_status {
+                    //for (check_token, check_status) in client_status.iter() {
+                    for (check_token, check_socket_data) in sockets.iter() {
+                        match check_socket_data.state {
                             ClientState::WaitingOnOpponent => {
                                 // Found a client waiting for an opponent
                                 if partner1_token == None {
                                     debug!("Found first client who is waiting for a game");
-                                    partner1_token = Some(*check_token);
+                                    partner1_token = Some(Token::from(check_token));
                                     continue;
                                 } else if partner2_token == None {
                                     debug!("Found second client who is waiting for a game");
-                                    partner2_token = Some(*check_token);
+                                    partner2_token = Some(Token::from(check_token));
                                     break;
                                 } else {
                                     unreachable!();
@@ -272,14 +274,14 @@ fn main () {
                             // Have two clients to match up in a game
                             let partner1_name = sockets.get_mut(usize::from(partner1_token)).unwrap().player_name.to_string();
                             let partner2_name = sockets.get_mut(usize::from(partner2_token)).unwrap().player_name.to_string();
+                            sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner2_token);
+                            sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner1_token);
                             // Update client status
                             if let Some(partner1_status) = client_status.get_mut(&partner1_token) {
                                 *partner1_status = ClientState::GameInProgress(partner2_token);
-                                sockets.get_mut(usize::from(partner1_token)).unwrap().state = ClientState::GameInProgress(partner2_token);
                             }
                             if let Some(partner2_status) = client_status.get_mut(&partner2_token) {
                                 *partner2_status = ClientState::GameInProgress(partner1_token);
-                                sockets.get_mut(usize::from(partner2_token)).unwrap().state = ClientState::GameInProgress(partner1_token);
                             }
 
                             // Build a new Game object
