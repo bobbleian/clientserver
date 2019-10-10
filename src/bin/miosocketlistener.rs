@@ -116,7 +116,7 @@ fn main () {
                                 poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
                                 sockets.remove(usize::from(token));
 
-                                // TODO Remove/Update GameData
+                                // Remove/Update GameData
                                 games.retain(|game| {
                                     !game.game_has_player(usize::from(token))
                                 });
@@ -276,6 +276,11 @@ fn main () {
 
                             // Add the Game object to the global store
                             games.push(game_data);
+
+                            // Send GameData message to clients:
+                            // max_players, max_move, game_board_size
+                            message_queue.push((usize::from(partner1_token), [4, 3, 2, 3, 10].to_vec()));
+                            message_queue.push((usize::from(partner2_token), [4, 3, 2, 3, 10].to_vec()));
 
                         }
                     }

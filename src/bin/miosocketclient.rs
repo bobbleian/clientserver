@@ -2,9 +2,11 @@ use std::{net,str,thread,fs};
 use std::io::{self,BufReader,Read,Write};
 use std::sync::{mpsc,Arc};
 
-use log::{debug, info, warn};
+use log::{debug, warn};
 
 use mio::{Events, Poll, Ready, PollOpt, Token, net::TcpStream};
+
+use clientserver::game::GameData;
 
 use rustls::{ClientSession,Session};
 use console::Term;
@@ -22,11 +24,9 @@ fn main () {
     let example_com = webpki::DNSNameRef::try_from_ascii_str("localhost").unwrap();
     let mut client = ClientSession::new(&rc_config, example_com);
 
-    let mut game_board = Vec::<u8>::new();
+    let mut game_data: Option<GameData> = None;
 
     let poll = Poll::new().unwrap();
-
-
 
     let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     match TcpStream::connect(&addr) {
@@ -71,8 +71,11 @@ fn main () {
                         let term = Term::stdout();
                         term.clear_screen().unwrap();
                         println!("Player: {}", user_name);
-                        println!("Game Board: {:?} ", game_board.as_slice());
-                        println!("Game Total: {} ", game_board.len());
+                        if let Some(ref game_data) = game_data {
+                            println!("Max Move: {}", game_data.get_max_move());
+                            println!("Game Board: {:?} ", game_data.get_game_board());
+                            println!("Game Total: {} ", game_data.get_game_board().len());
+                        }
                         print!("> ");
                     }
                     io::stdout().flush().unwrap();
@@ -156,7 +159,7 @@ fn main () {
                                     // process the data
                                     let mut i = 0;
                                     while i < data.len() {
-                                        process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], &mut game_board);
+                                        game_data = process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], game_data);
                                         i = i + 2 + data[i+1] as usize;
                                         debug!("Incremented i: {}", i);
                                     }
@@ -191,12 +194,13 @@ fn main () {
 }
 
 
-fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_board: &mut Vec<u8>) {
+fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: Option<GameData>) -> Option<GameData> {
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
         // 0: Opponent has disconnected
         0 => {
             println!("Your chat partner has ended the conversation...");
+            None
         },
 
         // 1: New message from opponent
@@ -209,6 +213,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_board: 
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
+            game_data
         },
 
         // 2: Partner name message
@@ -220,17 +225,34 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_board: 
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
+            game_data
         },
 
         // 3: Game Board update
         3 => {
-            game_board.clear();
-            game_board.extend_from_slice(data);
+            //game_board.clear();
+            //game_board.extend_from_slice(data);
+            game_data
+        },
+
+        // 3: Game Data update
+        4 => {
+            // Game Data only contains 3 fields:
+            // max_players
+            // max_move
+            // game_board_size
+            match data.len() {
+                3 => {
+                    Some(GameData::new(data[0], data[1], data[2]))
+                },
+                _ => unreachable!(),
+            }
         },
 
         // Unknown control byte; do nothing?
         _ => {
             println!("Unknown control byte");
+            game_data
         }
     }
 }

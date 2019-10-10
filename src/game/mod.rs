@@ -44,9 +44,9 @@ impl GameData {
         self.player_ids.contains(&player_id)
     }
 
-    pub fn get_game_board(&self) -> &[u8] {
-        self.game_board.as_slice()
-    }
+    pub fn get_max_move(&self) -> u8 { self.max_move }
+
+    pub fn get_game_board(&self) -> &[u8] { self.game_board.as_slice() }
 
 }
 
