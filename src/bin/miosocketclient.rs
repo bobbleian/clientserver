@@ -75,6 +75,7 @@ fn main () {
                             println!("Max Move: {}", game_data.get_max_move());
                             println!("Game Board: {:?} ", game_data.get_game_board());
                             println!("Game Total: {} ", game_data.get_game_board().len());
+                            println!("Game Players: {:?} ", game_data.get_player_names());
                         }
                         print!("> ");
                     }
@@ -159,7 +160,7 @@ fn main () {
                                     // process the data
                                     let mut i = 0;
                                     while i < data.len() {
-                                        game_data = process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], game_data);
+                                        process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], &mut game_data);
                                         i = i + 2 + data[i+1] as usize;
                                         debug!("Incremented i: {}", i);
                                     }
@@ -194,13 +195,12 @@ fn main () {
 }
 
 
-fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: Option<GameData>) -> Option<GameData> {
+fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &mut Option<GameData>) {
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
         // 0: Opponent has disconnected
         0 => {
             println!("Your chat partner has ended the conversation...");
-            None
         },
 
         // 1: New message from opponent
@@ -213,7 +213,6 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: O
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
-            game_data
         },
 
         // 2: Partner name message
@@ -225,14 +224,12 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: O
                 }
                 Err(_) => panic!("invalid utf-8 sequence!"),
             };
-            game_data
         },
 
         // 3: Game Board update
         3 => {
             //game_board.clear();
             //game_board.extend_from_slice(data);
-            game_data
         },
 
         // 3: Game Data update
@@ -243,16 +240,27 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: O
             // game_board_size
             match data.len() {
                 3 => {
-                    Some(GameData::new(data[0], data[1], data[2]))
+                    *game_data = Some(GameData::new(data[0], data[1], data[2]))
                 },
                 _ => unreachable!(),
+            }
+        },
+
+        // 5: Add_Player message
+        // data[0] - player id
+        // data[1..] - player name
+        5 => {
+            // Process add player only if we already have a GameData struct
+            if let Some(ref mut game_data) = game_data {
+                let player_id = data[0] as usize;
+                let player_name = str::from_utf8(&data[1..]).unwrap();
+                game_data.add_player(player_id, player_name);
             }
         },
 
         // Unknown control byte; do nothing?
         _ => {
             println!("Unknown control byte");
-            game_data
         }
     }
 }

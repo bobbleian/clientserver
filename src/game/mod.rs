@@ -48,6 +48,8 @@ impl GameData {
 
     pub fn get_game_board(&self) -> &[u8] { self.game_board.as_slice() }
 
+    pub fn get_player_names(&self) -> &Vec<String> { &self.player_names }
+
 }
 
 trait GameState {

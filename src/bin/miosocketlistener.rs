@@ -127,15 +127,16 @@ fn main () {
                                 // Process packets
                                 match socket_data.session.process_new_packets() {
                                     Ok(_) => {
-                                        let mut plaintext = Vec::<u8>::new();
-                                        match socket_data.session.read_to_end(&mut plaintext) {
+                                        let mut client_data = Vec::<u8>::new();
+                                        match socket_data.session.read_to_end(&mut client_data) {
                                             Ok(0) => (),
-                                            Ok(n) => {
-                                                println!("read_to_end: {}", n);
-                                                println!("Got a string length: {}", plaintext.len());
-                                                // Echo everything to stdout
-                                                match String::from_utf8(plaintext) {
-                                                    Ok(mut v) => {
+                                            Ok(_) => {
+                                                println!("Got a data length: {}", client_data.len());
+                                                // Process client messages
+                                                match client_data[0] {
+                                                    // Generic string
+                                                    1 => {
+                                                        let v = str::from_utf8(&client_data[2..]).unwrap().to_string();
                                                         println!("{}: {:?}", v, v.clone().into_bytes());
 
                                                         // Got a string from the client, process it
@@ -163,12 +164,12 @@ fn main () {
 
                                                                 // forward packet from sender
                                                                 println!("Send string to partner");
-                                                                message_queue.push((usize::from(partner_token), v.as_bytes().to_vec()));
+                                                                message_queue.push((usize::from(partner_token), client_data));
 
                                                                 // Get the game data
                                                                 if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
                                                                     // Parse the player move
-                                                                    match v.split_off(2).parse::<u8>() {
+                                                                    match v.parse::<u8>() {
                                                                         Ok(player_move) => {
                                                                             // make the player move
                                                                             game_data.move_player(usize::from(token), player_move);
@@ -189,8 +190,8 @@ fn main () {
                                                             },
                                                         }
 
-                                                    }
-                                                    Err(_) => panic!("invalid utf-8 sequence!"),
+                                                    },
+                                                    _ => unreachable!("Unknown message type!!"),
                                                 };
                                             },
                                             Err(e) => panic!(e),
@@ -281,6 +282,25 @@ fn main () {
                             // max_players, max_move, game_board_size
                             message_queue.push((usize::from(partner1_token), [4, 3, 2, 3, 10].to_vec()));
                             message_queue.push((usize::from(partner2_token), [4, 3, 2, 3, 10].to_vec()));
+
+                            // Send Add_Player messages to both clients
+                            let mut add_player1_message = Vec::<u8>::new();
+                            add_player1_message.push(5);
+                            add_player1_message.push((partner1_name.as_bytes().len() + 1) as u8);
+                            add_player1_message.push(usize::from(partner1_token) as u8);
+                            add_player1_message.extend_from_slice(partner1_name.as_bytes());
+
+                            let mut add_player2_message = Vec::<u8>::new();
+                            add_player2_message.push(5);
+                            add_player2_message.push((partner2_name.as_bytes().len() + 1) as u8);
+                            add_player2_message.push(usize::from(partner2_token) as u8);
+                            add_player2_message.extend_from_slice(partner2_name.as_bytes());
+
+                            message_queue.push((usize::from(partner1_token), add_player1_message.clone()));
+                            message_queue.push((usize::from(partner2_token), add_player1_message));
+
+                            message_queue.push((usize::from(partner1_token), add_player2_message.clone()));
+                            message_queue.push((usize::from(partner2_token), add_player2_message));
 
                         }
                     }
