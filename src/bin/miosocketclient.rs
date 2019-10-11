@@ -28,6 +28,8 @@ fn main () {
     let mut user_name = String::new();
     let mut user_id = std::usize::MAX;
 
+    let winning_player_style = Style::new().green().blink().reverse();
+    let losing_player_style = Style::new().red().blink().reverse();
     let active_player_style = Style::new().green();
     let inactive_player_style = Style::new().red();
 
@@ -74,11 +76,19 @@ fn main () {
                         // Echo board to stdout
                         let term = Term::stdout();
                         term.clear_screen().unwrap();
-                        if let Some(ref game_data) = game_data {
-                            if game_data.get_active_player_id() == user_id as u8 {
-                                println!("Player: {} [{}]", active_player_style.apply_to(user_name.clone()), user_id);
+                        if let Some(ref mut game_data) = game_data {
+                            if game_data.is_game_over() {
+                                if game_data.get_active_player_id() == user_id as u8 {
+                                    println!("Player: {} [{}]", losing_player_style.apply_to(user_name.clone()), user_id);
+                                } else {
+                                    println!("Player: {} [{}]", winning_player_style.apply_to(user_name.clone()), user_id);
+                                }
                             } else {
-                                println!("Player: {} [{}]", inactive_player_style.apply_to(user_name.clone()), user_id);
+                                if game_data.get_active_player_id() == user_id as u8 {
+                                    println!("Player: {} [{}]", active_player_style.apply_to(user_name.clone()), user_id);
+                                } else {
+                                    println!("Player: {} [{}]", inactive_player_style.apply_to(user_name.clone()), user_id);
+                                }
                             }
                             println!("Active Player: {}", game_data.get_active_player_id());
                             println!("Max Move: {}", game_data.get_max_move());

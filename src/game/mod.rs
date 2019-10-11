@@ -50,6 +50,13 @@ impl GameData {
         }
     }
 
+    pub fn is_game_over(&self) -> bool {
+        if let Some(ref s) = self.state {
+            return s.is_game_over();
+        }
+        false
+    }
+
     pub fn game_has_player(&self, player_id: usize) -> bool {
         self.player_ids.contains(&player_id)
     }
@@ -73,7 +80,7 @@ trait GameState {
     fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState>;
     fn move_player(self: Box<Self>, game_data: &mut GameData, player: u8, player_move: u8) -> Box<dyn GameState>;
     fn set_active_player(self: Box<Self>, game_data: &mut GameData, player: u8) -> Box<dyn GameState>;
-    fn is_game_over() -> bool where Self: Sized { return false; }
+    fn is_game_over(&self) -> bool;
 }
 
 struct WaitingForPlayers {
@@ -104,6 +111,7 @@ impl GameState for WaitingForPlayers {
     // Empty implementation
     fn move_player(self: Box<Self>, _game_data: &mut GameData, _player: u8, _player_move: u8) -> Box<dyn GameState> { self }
     fn set_active_player(self: Box<Self>, _game_data: &mut GameData, _player: u8) -> Box<dyn GameState> { self }
+    fn is_game_over(&self) -> bool { return false; }
 }
 
 impl GameState for WaitingOnMove {
@@ -152,6 +160,8 @@ impl GameState for WaitingOnMove {
         self
     }
 
+    fn is_game_over(&self) -> bool { return false; }
+
 }
 
 impl GameState for GameOver {
@@ -168,7 +178,7 @@ impl GameState for GameOver {
     fn set_active_player(self: Box<Self>, _game_data: &mut GameData, _player: u8) -> Box<dyn GameState> { self }
 
     // Game IS over!
-    fn is_game_over() -> bool where Self: Sized { return true; }
+    fn is_game_over(&self) -> bool { return true; }
 }
 
 
