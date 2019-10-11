@@ -76,6 +76,14 @@ fn main () {
                             let token = Token(socket_entry.key());
                             poll.register(&socket, token, Ready::readable() | Ready::writable(), PollOpt::level()).unwrap();
                             socket_entry.insert(SocketData{player_name: String::from(""), socket: socket, session: ServerSession::new(&rc_config), state: ClientState::Connected});
+                            // Send a Welcome message
+                            // player_id (token)
+                            let mut welcome_message: Vec<u8> = Vec::with_capacity(3);
+                            welcome_message.push(8);
+                            welcome_message.push(1);
+                            welcome_message.push(usize::from(token) as u8);
+                            message_queue.push((usize::from(token), welcome_message));
+
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                             println!("Listening socket would block");
@@ -154,20 +162,9 @@ fn main () {
                                                                 println!("Still waiting on opponent for client: {:?}", token);
                                                             },
                                                             ClientState::GameInProgress(partner_token) => {
-                                                                // send name to partner
-                                                                let buffer_data = socket_data.player_name.as_bytes();
-                                                                let mut staged_data: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
-                                                                staged_data.push(2);
-                                                                staged_data.push(buffer_data.len() as u8);
-                                                                staged_data.extend_from_slice(&buffer_data[..]);
-                                                                message_queue.push((usize::from(partner_token), staged_data.clone()));
-
-                                                                // forward packet from sender
-                                                                println!("Send string to partner");
-                                                                message_queue.push((usize::from(partner_token), client_data));
-
                                                                 // Get the game data
-                                                                if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
+                                                                if let Some(game_data) = games.iter_mut().find(|game|
+                                                                                                               game.game_has_player(usize::from(token))) {
                                                                     // Parse the player move
                                                                     match v.parse::<u8>() {
                                                                         Ok(player_move) => {
@@ -175,16 +172,27 @@ fn main () {
                                                                             game_data.move_player(usize::from(token), player_move);
 
                                                                             // send the game board
-                                                                let game_board = game_data.get_game_board();
+                                                                            let game_board = game_data.get_game_board();
                                                                             println!("Sending board update: {:?}", game_board);
-                                                                let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
-                                                                s_data.push(3);
-                                                                s_data.push(game_board.len() as u8);
-                                                                s_data.extend_from_slice(&game_board[..]);
-                                                                message_queue.push((usize::from(partner_token), s_data.clone()));
-                                                                message_queue.push((usize::from(token), s_data.clone()));
+                                                                            let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
+                                                                            s_data.push(3);
+                                                                            s_data.push(game_board.len() as u8);
+                                                                            s_data.extend_from_slice(&game_board[..]);
+                                                                            message_queue.push((usize::from(partner_token), s_data.clone()));
+                                                                            message_queue.push((usize::from(token), s_data.clone()));
+
+                                                                            // Send Move_Player message
+                                                                            let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
+                                                                            move_player_message.push(6);
+                                                                            move_player_message.push(2);
+                                                                            move_player_message.push(usize::from(token) as u8);
+                                                                            move_player_message.push(player_move);
+
+                                                                            message_queue.push((usize::from(partner_token), move_player_message.clone()));
+                                                                            message_queue.push((usize::from(token), move_player_message));
+
                                                                         },
-                                                                        Err(e) => { println!("Error parsing '{}': {}", v, e); }
+                                                                        Err(e) => { println!("Cannot parse player move '{}': {}", v, e); }
                                                                     }
                                                                 }
                                                             },
@@ -205,8 +213,6 @@ fn main () {
                                 println!("Read Would block");
                             }
                             Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {
-                                // Socket is not ready anymore, stop reading
-                                println!("Connection reset breaking");
                                 poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
                                 sockets.remove(usize::from(token));
                                 break;
@@ -275,13 +281,12 @@ fn main () {
                             game_data.add_player(usize::from(partner1_token), &partner1_name);
                             game_data.add_player(usize::from(partner2_token), &partner2_name);
 
-                            // Add the Game object to the global store
-                            games.push(game_data);
-
                             // Send GameData message to clients:
                             // max_players, max_move, game_board_size
-                            message_queue.push((usize::from(partner1_token), [4, 3, 2, 3, 10].to_vec()));
-                            message_queue.push((usize::from(partner2_token), [4, 3, 2, 3, 10].to_vec()));
+                            let mut game_data_message = Vec::<u8>::with_capacity(5);
+                            game_data_message.extend_from_slice(&[4,3,2,3,10]);
+                            message_queue.push((usize::from(partner1_token), game_data_message.clone()));
+                            message_queue.push((usize::from(partner2_token), game_data_message));
 
                             // Send Add_Player messages to both clients
                             let mut add_player1_message = Vec::<u8>::new();
@@ -301,6 +306,20 @@ fn main () {
 
                             message_queue.push((usize::from(partner1_token), add_player2_message.clone()));
                             message_queue.push((usize::from(partner2_token), add_player2_message));
+
+                            // Send Set_Active_Player message to both clients
+                            // player_id
+                            let mut set_active_player_message = Vec::<u8>::with_capacity(3);
+                            set_active_player_message.push(7);
+                            set_active_player_message.push(1);
+                            set_active_player_message.push(game_data.get_active_player_id());
+
+                            message_queue.push((usize::from(partner1_token), set_active_player_message.clone()));
+                            message_queue.push((usize::from(partner2_token), set_active_player_message));
+
+                            // Add the Game object to the global store
+                            games.push(game_data);
+
 
                         }
                     }

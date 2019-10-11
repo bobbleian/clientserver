@@ -29,6 +29,16 @@ impl GameData {
         }
     }
 
+    pub fn set_active_player(&mut self, player_id: usize) {
+        if let Some(player) = self.player_ids.iter().position(|id| *id == player_id) {
+            if let Some(s) = self.state.take() {
+                self.state = Some(s.set_active_player(self, player as u8));
+            }
+        } else {
+            panic!("Cannot find player: {}", player_id);
+        }
+    }
+
     pub fn move_player(&mut self, player_id: usize, player_move: u8) {
         println!("Moving player {} {} steps", player_id, player_move);
         if let Some(player) = self.player_ids.iter().position(|id| *id == player_id) {
@@ -46,6 +56,13 @@ impl GameData {
 
     pub fn get_max_move(&self) -> u8 { self.max_move }
 
+    pub fn get_active_player_id(&self) -> u8 {
+        match self.player_ids.get(self.active_player as usize) {
+            Some(&i) => { i as u8 },
+            None => { std::u8::MAX },
+        }
+    }
+
     pub fn get_game_board(&self) -> &[u8] { self.game_board.as_slice() }
 
     pub fn get_player_names(&self) -> &Vec<String> { &self.player_names }
@@ -55,6 +72,7 @@ impl GameData {
 trait GameState {
     fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState>;
     fn move_player(self: Box<Self>, game_data: &mut GameData, player: u8, player_move: u8) -> Box<dyn GameState>;
+    fn set_active_player(self: Box<Self>, game_data: &mut GameData, player: u8) -> Box<dyn GameState>;
     fn is_game_over() -> bool where Self: Sized { return false; }
 }
 
@@ -84,10 +102,8 @@ impl GameState for WaitingForPlayers {
     }
 
     // Empty implementation
-    fn move_player(self: Box<Self>, _game_data: &mut GameData, _player: u8, _player_move: u8) -> Box<dyn GameState> {
-        println!("Waiting for player, no move made");
-        self
-    }
+    fn move_player(self: Box<Self>, _game_data: &mut GameData, _player: u8, _player_move: u8) -> Box<dyn GameState> { self }
+    fn set_active_player(self: Box<Self>, _game_data: &mut GameData, _player: u8) -> Box<dyn GameState> { self }
 }
 
 impl GameState for WaitingOnMove {
@@ -128,6 +144,14 @@ impl GameState for WaitingOnMove {
         self
     }
 
+    fn set_active_player(self: Box<Self>, game_data: &mut GameData, player: u8) -> Box<dyn GameState> {
+        // Only allow a change in active player if no moves have been made
+        if game_data.game_board.len() == 0 {
+            game_data.active_player = player;
+        }
+        self
+    }
+
 }
 
 impl GameState for GameOver {
@@ -140,6 +164,8 @@ impl GameState for GameOver {
         println!("Game Over, cannot move player");
         self
     }
+
+    fn set_active_player(self: Box<Self>, _game_data: &mut GameData, _player: u8) -> Box<dyn GameState> { self }
 
     // Game IS over!
     fn is_game_over() -> bool where Self: Sized { return true; }
