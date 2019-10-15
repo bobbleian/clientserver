@@ -358,6 +358,41 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
             }
         },
 
+        // 2: Restart_Game message
+        // control_byte: 2
+        // data_len: 0
+        2 => {
+            match socket_data.state {
+                ClientState::GameInProgress(partner_token) => {
+                    // Get the game data
+                    if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
+
+                        // Ensure game is over
+                        if game_data.is_game_over() {
+                            // Restart request, add_player
+                            game_data.add_player(usize::from(token), "");
+
+                            // Send Add_Player messages to both clients
+                            let mut add_player_message = Vec::<u8>::new();
+                            add_player_message.push(5);
+                            add_player_message.push(1);
+                            add_player_message.push(usize::from(token) as u8);
+
+                            message_queue.push((usize::from(partner_token), add_player_message.clone()));
+                            message_queue.push((usize::from(token), add_player_message));
+
+                        } else {
+                        }
+                    } else {
+                        // TODO: No game to restart
+                    }
+                },
+
+                // Do nothing for any state other than GameInProgress
+                _ => { }
+            }
+        },
+
 
         // Unknown control byte; do nothing?
         unknown => {

@@ -121,8 +121,8 @@ fn main () {
                             user_name = buffer.clone().trim().to_string();
 
                             // Send User_Name message
-                            // control byte: 0
-                            // data len: n
+                            // control_byte: 0
+                            // data_len: n
                             // data[0..n] = user name
                             let mut user_name_message: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
                             user_name_message.push(0);
@@ -132,11 +132,25 @@ fn main () {
                         } else {
                             if let Some(ref mut game_data) = game_data {
                                 if game_data.is_game_over() {
+                                    if "yes".eq_ignore_ascii_case(&buffer) {
+                                        // Send Restart_Game message
+                                        // control_byte: 2
+                                        // data_len: 0
+                                        let mut restart_game_message: Vec<u8> = Vec::with_capacity(2);
+                                        restart_game_message.push(2);
+                                        restart_game_message.push(0);
+                                        client.write(&restart_game_message).unwrap();
+                                    } else if "no".eq_ignore_ascii_case(&buffer) {
+                                    }
                                 } else {
                                     // Have a game, client has entered a move
                                     // Parse the player move
                                     match buffer.parse::<u8>() {
                                         Ok(player_move) => {
+                                            // Send Player_Move message
+                                            // control_byte: 1
+                                            // data_len: 1
+                                            // data[0]: player_move
                                             let mut player_move_message: Vec<u8> = Vec::with_capacity(3);
                                             player_move_message.push(1);
                                             player_move_message.push(1);
