@@ -53,7 +53,7 @@ fn main () {
     poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level()).unwrap();
 
     // Outgoing message queue
-    let message_queue = &mut Vec::new();
+    let mut message_queue = Vec::<(usize, Vec::<u8>)>::new();
 
     loop {
 
@@ -94,7 +94,7 @@ fn main () {
                 },
                 token => {
                     //println!("Got a token");
-                    let socket_data = &mut sockets.get_mut(usize::from(token)).unwrap();
+                    let mut socket_data = &mut sockets.get_mut(usize::from(token)).unwrap();
                     if event.readiness().is_readable() && socket_data.session.wants_read() {
                         match socket_data.session.read_tls(&mut socket_data.socket) {
                             Ok(0) => {
@@ -135,72 +135,23 @@ fn main () {
                                 // Process packets
                                 match socket_data.session.process_new_packets() {
                                     Ok(_) => {
-                                        let mut client_data = Vec::<u8>::new();
-                                        match socket_data.session.read_to_end(&mut client_data) {
+                                        let mut data = Vec::<u8>::new();
+                                        match socket_data.session.read_to_end(&mut data) {
                                             Ok(0) => (),
-                                            Ok(_) => {
-                                                println!("Got a data length: {}", client_data.len());
-                                                // Process client messages
-                                                match client_data[0] {
-                                                    // Generic string
-                                                    1 => {
-                                                        let v = str::from_utf8(&client_data[2..]).unwrap().to_string();
-                                                        println!("{}: {:?}", v, v.clone().into_bytes());
+                                            Ok(1) => unreachable!(),
+                                            Ok(n) => {
+                                                debug!("read_to_end: {}", n);
+                                                debug!("Got a data: {:?}", data);
 
-                                                        // Got a string from the client, process it
-                                                        // based on the client state
-                                                        match socket_data.state {
-                                                            ClientState::Connected => {
-                                                                println!("Got client name, now WaitingOnOpponent");
-                                                                // Update client status to
-                                                                // WaitingOnOpponent
-                                                                socket_data.state = ClientState::WaitingOnOpponent;
-                                                                socket_data.player_name = v.to_string();
+                                                // process the data
+                                                let mut i = 0;
+                                                while i < data.len() {
+                                                    process_client_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], token, &mut socket_data, &mut games, &mut message_queue);
 
-                                                            },
-                                                            ClientState::WaitingOnOpponent => {
-                                                                println!("Still waiting on opponent for client: {:?}", token);
-                                                            },
-                                                            ClientState::GameInProgress(partner_token) => {
-                                                                // Get the game data
-                                                                if let Some(game_data) = games.iter_mut().find(|game|
-                                                                                                               game.game_has_player(usize::from(token))) {
-                                                                    // Parse the player move
-                                                                    match v.parse::<u8>() {
-                                                                        Ok(player_move) => {
-                                                                            // make the player move
-                                                                            game_data.move_player(usize::from(token), player_move);
 
-                                                                            // send the game board
-                                                                            let game_board = game_data.get_game_board();
-                                                                            println!("Sending board update: {:?}", game_board);
-                                                                            let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
-                                                                            s_data.push(3);
-                                                                            s_data.push(game_board.len() as u8);
-                                                                            s_data.extend_from_slice(&game_board[..]);
-                                                                            message_queue.push((usize::from(partner_token), s_data.clone()));
-                                                                            message_queue.push((usize::from(token), s_data.clone()));
-
-                                                                            // Send Move_Player message
-                                                                            let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
-                                                                            move_player_message.push(6);
-                                                                            move_player_message.push(2);
-                                                                            move_player_message.push(usize::from(token) as u8);
-                                                                            move_player_message.push(player_move);
-
-                                                                            message_queue.push((usize::from(partner_token), move_player_message.clone()));
-                                                                            message_queue.push((usize::from(token), move_player_message));
-
-                                                                        },
-                                                                        Err(e) => { println!("Cannot parse player move '{}': {}", v, e); }
-                                                                    }
-                                                                }
-                                                            },
-                                                        }
-
-                                                    },
-                                                    _ => unreachable!("Unknown message type!!"),
-                                                };
+                                                    i = i + 2 + data[i+1] as usize;
+                                                    debug!("Incremented i: {}", i);
+                                                }
                                             },
                                             Err(e) => panic!(e),
                                         }
@@ -334,6 +285,73 @@ fn main () {
                 },
             }
 
+        }
+    }
+}
+
+fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token, socket_data: &mut SocketData, games: &mut Vec<GameData>, message_queue: &mut Vec::<(usize, Vec::<u8>)>) {
+    println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
+    match control_byte {
+        // 1: Generic message from client
+        1 => {
+            let v = str::from_utf8(data).unwrap().to_string();
+            println!("{}: {:?}", v, v.clone().into_bytes());
+
+            // Got a string from the client, process it
+            // based on the client state
+            match socket_data.state {
+                ClientState::Connected => {
+                    println!("Got client name, now WaitingOnOpponent");
+                    // Update client status to
+                    // WaitingOnOpponent
+                    socket_data.state = ClientState::WaitingOnOpponent;
+                    socket_data.player_name = v.to_string();
+
+                },
+                ClientState::WaitingOnOpponent => {
+                    println!("Still waiting on opponent for client: {:?}", token);
+                },
+                ClientState::GameInProgress(partner_token) => {
+                    // Get the game data
+                    if let Some(game_data) = games.iter_mut().find(|game|
+                                                                   game.game_has_player(usize::from(token))) {
+                        // Parse the player move
+                        match v.parse::<u8>() {
+                            Ok(player_move) => {
+                                // make the player move
+                                game_data.move_player(usize::from(token), player_move);
+
+                                // send the game board
+                                let game_board = game_data.get_game_board();
+                                println!("Sending board update: {:?}", game_board);
+                                let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
+                                s_data.push(3);
+                                s_data.push(game_board.len() as u8);
+                                s_data.extend_from_slice(&game_board[..]);
+                                message_queue.push((usize::from(partner_token), s_data.clone()));
+                                message_queue.push((usize::from(token), s_data.clone()));
+
+                                // Send Move_Player message
+                                let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
+                                move_player_message.push(6);
+                                move_player_message.push(2);
+                                move_player_message.push(usize::from(token) as u8);
+                                move_player_message.push(player_move);
+
+                                message_queue.push((usize::from(partner_token), move_player_message.clone()));
+                                message_queue.push((usize::from(token), move_player_message));
+
+                            },
+                            Err(e) => { println!("Cannot parse player move '{}': {}", v, e); }
+                        }
+                    }
+                },
+            }
+        },
+
+        // Unknown control byte; do nothing?
+        unknown => {
+            println!("Unknown control byte: {}", unknown);
         }
     }
 }
