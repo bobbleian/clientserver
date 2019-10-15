@@ -148,7 +148,6 @@ fn main () {
                                                 while i < data.len() {
                                                     process_client_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], token, &mut socket_data, &mut games, &mut message_queue);
 
-
                                                     i = i + 2 + data[i+1] as usize;
                                                     debug!("Incremented i: {}", i);
                                                 }
@@ -292,62 +291,73 @@ fn main () {
 fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token, socket_data: &mut SocketData, games: &mut Vec<GameData>, message_queue: &mut Vec::<(usize, Vec::<u8>)>) {
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
-        // 1: Generic message from client
-        1 => {
+
+        // 0: User_Name Message
+        // control_byte: 0
+        // data_len: n
+        // data[..] = user_name
+        0 => {
             let v = str::from_utf8(data).unwrap().to_string();
             println!("{}: {:?}", v, v.clone().into_bytes());
 
             // Got a string from the client, process it
             // based on the client state
             match socket_data.state {
+                // Only process when client is in Connected state
                 ClientState::Connected => {
                     println!("Got client name, now WaitingOnOpponent");
                     // Update client status to
                     // WaitingOnOpponent
                     socket_data.state = ClientState::WaitingOnOpponent;
-                    socket_data.player_name = v.to_string();
+                    socket_data.player_name = v;
 
                 },
-                ClientState::WaitingOnOpponent => {
-                    println!("Still waiting on opponent for client: {:?}", token);
-                },
-                ClientState::GameInProgress(partner_token) => {
-                    // Get the game data
-                    if let Some(game_data) = games.iter_mut().find(|game|
-                                                                   game.game_has_player(usize::from(token))) {
-                        // Parse the player move
-                        match v.parse::<u8>() {
-                            Ok(player_move) => {
-                                // make the player move
-                                game_data.move_player(usize::from(token), player_move);
-
-                                // send the game board
-                                let game_board = game_data.get_game_board();
-                                println!("Sending board update: {:?}", game_board);
-                                let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
-                                s_data.push(3);
-                                s_data.push(game_board.len() as u8);
-                                s_data.extend_from_slice(&game_board[..]);
-                                message_queue.push((usize::from(partner_token), s_data.clone()));
-                                message_queue.push((usize::from(token), s_data.clone()));
-
-                                // Send Move_Player message
-                                let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
-                                move_player_message.push(6);
-                                move_player_message.push(2);
-                                move_player_message.push(usize::from(token) as u8);
-                                move_player_message.push(player_move);
-
-                                message_queue.push((usize::from(partner_token), move_player_message.clone()));
-                                message_queue.push((usize::from(token), move_player_message));
-
-                            },
-                            Err(e) => { println!("Cannot parse player move '{}': {}", v, e); }
-                        }
-                    }
-                },
+                _ => {
+                    // Do nothing
+                }
             }
         },
+
+        // 1: Player_Move message
+        // control_byte: 1
+        // data_len: 1
+        // data[0]: player_move
+        1 => {
+            match socket_data.state {
+                ClientState::GameInProgress(partner_token) => {
+                    // Get the game data
+                    if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
+                        // make the player move
+                        let player_move = data[0];
+                        game_data.move_player(usize::from(token), player_move);
+
+                        // send the game board
+                        let game_board = game_data.get_game_board();
+                        println!("Sending board update: {:?}", game_board);
+                        let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
+                        s_data.push(3);
+                        s_data.push(game_board.len() as u8);
+                        s_data.extend_from_slice(&game_board[..]);
+                        message_queue.push((usize::from(partner_token), s_data.clone()));
+                        message_queue.push((usize::from(token), s_data.clone()));
+
+                        // Send Move_Player message
+                        let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
+                        move_player_message.push(6);
+                        move_player_message.push(2);
+                        move_player_message.push(usize::from(token) as u8);
+                        move_player_message.push(player_move);
+
+                        message_queue.push((usize::from(partner_token), move_player_message.clone()));
+                        message_queue.push((usize::from(token), move_player_message));
+                    }
+                },
+
+                // Do nothing for any state other than GameInProgress
+                _ => { }
+            }
+        },
+
 
         // Unknown control byte; do nothing?
         unknown => {

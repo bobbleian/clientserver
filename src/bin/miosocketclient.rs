@@ -65,17 +65,17 @@ fn main () {
             let mut events = Events::with_capacity(1024);
 
             let mut update_user_prompt = true;
+            let term = Term::stdout();
 
             'outer: loop {
 
                 // Display user-prompt
                 if update_user_prompt {
+                    term.clear_screen().unwrap();
                     if user_name.is_empty() {
                         print!("Please enter user name: ");
                     } else {
                         // Echo board to stdout
-                        let term = Term::stdout();
-                        term.clear_screen().unwrap();
                         if let Some(ref mut game_data) = game_data {
                             if game_data.is_game_over() {
                                 if game_data.get_active_player_id() == user_id as u8 {
@@ -114,17 +114,41 @@ fn main () {
                     Ok(buffer) => {
                         debug!("{}", buffer);
                         let buffer_data = buffer.as_bytes();
-                        let mut staged_data: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
-                        staged_data.push(1);
-                        staged_data.push(buffer_data.len() as u8);
-                        staged_data.extend_from_slice(&buffer_data[..]);
-                        match client.write(&staged_data) {
-                            Ok(n) => debug!("client wrote {} bytes", n),
-                            Err(e) => panic!(e),
-                        }
+
+                        // Check to see if we have a user name
                         if user_name.is_empty() {
+                            // Set user name in the client
                             user_name = buffer.clone().trim().to_string();
+
+                            // Send User_Name message
+                            // control byte: 0
+                            // data len: n
+                            // data[0..n] = user name
+                            let mut user_name_message: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
+                            user_name_message.push(0);
+                            user_name_message.push(buffer_data.len() as u8);
+                            user_name_message.extend_from_slice(&buffer_data[..]);
+                            client.write(&user_name_message).unwrap();
+                        } else {
+                            if let Some(ref mut game_data) = game_data {
+                                if game_data.is_game_over() {
+                                } else {
+                                    // Have a game, client has entered a move
+                                    // Parse the player move
+                                    match buffer.parse::<u8>() {
+                                        Ok(player_move) => {
+                                            let mut player_move_message: Vec<u8> = Vec::with_capacity(3);
+                                            player_move_message.push(1);
+                                            player_move_message.push(1);
+                                            player_move_message.push(player_move);
+                                            client.write(&player_move_message).unwrap();
+                                        },
+                                        Err(e) => { println!("Cannot parse player move '{}': {}", buffer, e); }
+                                    }
+                                }
+                            }
                         }
+
                         update_user_prompt = true;
                     },
                     Err(_) => {
