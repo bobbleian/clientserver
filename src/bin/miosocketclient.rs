@@ -95,6 +95,11 @@ fn main () {
                             println!("Game Board: {:?} ", game_data.get_game_board());
                             println!("Game Total: {} ", game_data.get_game_board().len());
                             println!("Game Players: {:?} ", game_data.get_player_names());
+                            if game_data.is_game_over() {
+                                print!("Play again (yes/no)? ");
+                            } else {
+                                print!("Enter next move (1,2,3) ");
+                            }
                         } else {
                             println!("Player: {} [{}]", style(user_name.clone()).blue(), user_id);
                         }

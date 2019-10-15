@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 pub struct GameData {
     player_names: Vec<String>,
     player_ids: Vec<usize>,
+    restart_ids: HashSet<usize>,
     game_board: Vec<u8>,
     active_player: u8,
     max_players: u8,
@@ -14,6 +17,7 @@ impl GameData {
         GameData {
             player_names: Vec::new(),
             player_ids: Vec::<usize>::new(),
+            restart_ids: HashSet::<usize>::new(),
             game_board: Vec::new(),
             active_player: std::u8::MAX,
             max_players: max_players,
@@ -80,7 +84,7 @@ trait GameState {
     fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState>;
     fn move_player(self: Box<Self>, game_data: &mut GameData, player: u8, player_move: u8) -> Box<dyn GameState>;
     fn set_active_player(self: Box<Self>, game_data: &mut GameData, player: u8) -> Box<dyn GameState>;
-    fn is_game_over(&self) -> bool;
+    fn is_game_over(&self) -> bool { return false; }
 }
 
 struct WaitingForPlayers {
@@ -165,8 +169,21 @@ impl GameState for WaitingOnMove {
 }
 
 impl GameState for GameOver {
-    fn add_player(self: Box<Self>, _game_data: &mut GameData, _player_id: usize, _player_name: &str) -> Box<dyn GameState> {
-        self
+    fn add_player(self: Box<Self>, game_data: &mut GameData, player_id: usize, player_name: &str) -> Box<dyn GameState> {
+        println!("Adding player_id={}; player_name={}", player_id, player_name);
+        game_data.restart_ids.insert(player_id);
+        if game_data.player_ids.len() == game_data.restart_ids.len() {
+            // Restart the game - reset game state
+            game_data.restart_ids.clear();
+            game_data.game_board.clear();
+
+            // Leave starting player - last game's loser
+
+            // Update the game state
+            Box::new(WaitingOnMove {})
+        } else {
+            self
+        }
     }
 
     // Empty implementation
