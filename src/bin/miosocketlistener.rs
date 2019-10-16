@@ -39,13 +39,13 @@ fn main () {
     let mut games: Vec<GameData> = Vec::new();
 
     // rustls configuration
-    let mut path_buf = home_dir().unwrap();
-    path_buf.push("rootCertificate.pem");
+    let mut cert_buffer = home_dir().unwrap();
+    cert_buffer.push("rootCertificate.pem");
     let mut config = ServerConfig::new(NoClientAuth::new());
-    let certs = load_certs(path_buf);
-    path_buf = home_dir().unwrap();
-    path_buf.push("rootPrivkey.pem");
-    let privkey = load_private_key("/Users/ianc/rootPrivkey.pem");
+    let certs = load_certs(cert_buffer.as_path());
+    let mut privkey_buffer = home_dir().unwrap();
+    privkey_buffer.push("rootPrivkey.pem");
+    let privkey = load_private_key(privkey_buffer.as_path());
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
     let rc_config = Arc::new(config);
 
@@ -465,13 +465,13 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
     }
 }
 
-fn load_certs(filename: std::path::PathBuf) -> Vec<rustls::Certificate> {
+fn load_certs(filename: &std::path::Path) -> Vec<rustls::Certificate> {
     let certfile = fs::File::open(filename).expect("cannot open certificate file");
     let mut reader = BufReader::new(certfile);
     rustls::internal::pemfile::certs(&mut reader).unwrap()
 }
 
-fn load_private_key(filename: &str) -> rustls::PrivateKey {
+fn load_private_key(filename: &std::path::Path) -> rustls::PrivateKey {
     let rsa_keys = {
         let keyfile = fs::File::open(filename)
             .expect("cannot open private key file");
