@@ -7,6 +7,7 @@ use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::{TcpListener, TcpStream};
 
 use log::{debug};
+use dirs::home_dir;
 
 use rustls;
 use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
@@ -38,9 +39,13 @@ fn main () {
     let mut games: Vec<GameData> = Vec::new();
 
     // rustls configuration
+    let mut path_buf = home_dir().unwrap();
+    path_buf.push("rootCertificate.pem");
     let mut config = ServerConfig::new(NoClientAuth::new());
-    let certs = load_certs("/home/ianc/rootCertificate.pem");
-    let privkey = load_private_key("/home/ianc/rootPrivkey.pem");
+    let certs = load_certs(path_buf);
+    path_buf = home_dir().unwrap();
+    path_buf.push("rootPrivkey.pem");
+    let privkey = load_private_key("/Users/ianc/rootPrivkey.pem");
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
     let rc_config = Arc::new(config);
 
@@ -460,7 +465,7 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
     }
 }
 
-fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+fn load_certs(filename: std::path::PathBuf) -> Vec<rustls::Certificate> {
     let certfile = fs::File::open(filename).expect("cannot open certificate file");
     let mut reader = BufReader::new(certfile);
     rustls::internal::pemfile::certs(&mut reader).unwrap()

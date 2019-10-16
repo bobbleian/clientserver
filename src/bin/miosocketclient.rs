@@ -11,13 +11,18 @@ use clientserver::game::GameData;
 use rustls::{ClientSession,Session};
 use console::{Term, style, Style};
 
+use dirs::home_dir;
+
 const TALKER: Token = mio::Token(0);
 
 fn main () {
 
     // rustls configuration
     let mut config = rustls::ClientConfig::new();
-    let certfile = fs::File::open("/home/ianc/rootCertificate.pem").expect("Cannot open CA file");
+    let mut path_buf = home_dir().unwrap();
+    path_buf.push("rootCertificate.pem");
+
+    let certfile = fs::File::open(path_buf).expect("Cannot open CA file");
     let mut reader = BufReader::new(certfile);
     config.root_store.add_pem_file(&mut reader).unwrap();
     let rc_config = Arc::new(config);
