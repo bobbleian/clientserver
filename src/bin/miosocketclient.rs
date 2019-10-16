@@ -136,11 +136,14 @@ fn main () {
                                         // Send Restart_Game message
                                         // control_byte: 2
                                         // data_len: 0
-                                        let mut restart_game_message: Vec<u8> = Vec::with_capacity(2);
-                                        restart_game_message.push(2);
-                                        restart_game_message.push(0);
+                                        let restart_game_message: Vec<u8> = [2, 0].to_vec();
                                         client.write(&restart_game_message).unwrap();
                                     } else if "no".eq_ignore_ascii_case(&buffer) {
+                                        // Send End_Game message
+                                        // control_byte: 3
+                                        // data_len: 0
+                                        let end_game_message: Vec<u8> = [3, 0].to_vec();
+                                        client.write(&end_game_message).unwrap();
                                     }
                                 } else {
                                     // Have a game, client has entered a move
@@ -262,12 +265,15 @@ fn main () {
 fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &mut Option<GameData>, user_id: &mut usize) {
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
-        // 0: Opponent has disconnected
+        // 0: Opponent_Disconnect message
         0 => {
             println!("Your chat partner has ended the conversation...");
+
+            // Get rid of the game
+            *game_data = None;
         },
 
-        // 1: New message from opponent
+        // 1: New message from opponent (TODO - chat?)
         1 => {
             // Echo everything to stdout
             match str::from_utf8(data) {
@@ -279,7 +285,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
             };
         },
 
-        // 2: Partner name message
+        // 2: Partner name message (legacy)
         2 => {
             // Echo everything to stdout
             match str::from_utf8(data) {
@@ -290,7 +296,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
             };
         },
 
-        // 3: Game Board update
+        // 3: Game Board update (legacy)
         3 => {
             //game_board.clear();
             //game_board.extend_from_slice(data);

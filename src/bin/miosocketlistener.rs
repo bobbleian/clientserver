@@ -190,12 +190,31 @@ fn main () {
                         }
                     }
 
+                    // TODO: Move this into the message handling code
+                    // Update state of any socket connections that don't have active games
+                    for (check_token, check_socket_data) in sockets.iter_mut() {
+                        match check_socket_data.state {
+                            ClientState::GameInProgress(_) => {
+                                // If this token doesn't have an active game, update state
+                                if !games.iter().any(|game| game.game_has_player(usize::from(check_token))) {
+                                    // No game to match up with this socket_data, reset status to
+                                    // WaitingOnOpponent
+                                    check_socket_data.state = ClientState::WaitingOnOpponent;
+                                }
+                            },
+                            _ => (),
+                        }
+                    }
+
+
                     // Check to see if there are two clients we can pair up in a game
                     // See if there are any other
                     // clients we could start a game
                     // with
                     let mut partner1_token: Option<Token> = None;
+                    let mut partner1_name = "".to_string();
                     let mut partner2_token: Option<Token> = None;
+                    let mut partner2_name = "".to_string();
                     for (check_token, check_socket_data) in sockets.iter() {
                         match check_socket_data.state {
                             ClientState::WaitingOnOpponent => {
@@ -203,10 +222,12 @@ fn main () {
                                 if partner1_token == None {
                                     debug!("Found first client who is waiting for a game");
                                     partner1_token = Some(Token::from(check_token));
+                                    partner1_name = check_socket_data.player_name.to_string();
                                     continue;
                                 } else if partner2_token == None {
                                     debug!("Found second client who is waiting for a game");
                                     partner2_token = Some(Token::from(check_token));
+                                    partner2_name = check_socket_data.player_name.to_string();
                                     break;
                                 } else {
                                     unreachable!();
@@ -218,6 +239,8 @@ fn main () {
 
                     if let Some(partner1_token) = partner1_token {
                         if let Some(partner2_token) = partner2_token {
+
+                            println!("STARTING NEW GAME!  {} vs {}", partner1_name, partner2_name);
                             // Have two clients to match up in a game
                             let partner1_name = sockets.get_mut(usize::from(partner1_token)).unwrap().player_name.to_string();
                             let partner2_name = sockets.get_mut(usize::from(partner2_token)).unwrap().player_name.to_string();
@@ -306,8 +329,7 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                 // Only process when client is in Connected state
                 ClientState::Connected => {
                     println!("Got client name, now WaitingOnOpponent");
-                    // Update client status to
-                    // WaitingOnOpponent
+                    // Update client status to WaitingOnOpponent
                     socket_data.state = ClientState::WaitingOnOpponent;
                     socket_data.player_name = v;
 
@@ -392,6 +414,43 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                 _ => { }
             }
         },
+
+        // 3: End_Game message
+        // control_byte: 3
+        // data_len: 0
+        3 => {
+            match socket_data.state {
+                ClientState::GameInProgress(partner_token) => {
+                    // Get the game data
+                    if let Some(game_data) = games.iter_mut().find(|game| game.game_has_player(usize::from(token))) {
+
+                        // Ensure game is over
+                        if game_data.is_game_over() {
+                            // Send Opponent_Disconnect messages to both clients
+                            let disconnect_message: Vec::<u8> = [0, 0].to_vec();
+
+                            message_queue.push((usize::from(partner_token), disconnect_message.clone()));
+                            message_queue.push((usize::from(token), disconnect_message));
+
+                            // Update client status to WaitingOnOpponent
+                            socket_data.state = ClientState::WaitingOnOpponent;
+
+                        } else {
+                        }
+
+                        // Assumes the block above has sent Disconnect messages to both players
+                        // Remove the game being played from the active games list
+                        games.retain(|game| !game.game_has_player(usize::from(token)));
+                    } else {
+                        // TODO: No game to end
+                    }
+                },
+
+                // Do nothing for any state other than GameInProgress
+                _ => { }
+            }
+        },
+
 
 
         // Unknown control byte; do nothing?
