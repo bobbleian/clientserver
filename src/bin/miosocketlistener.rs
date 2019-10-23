@@ -47,6 +47,7 @@ fn main () {
     privkey_buffer.push("rootPrivkey.pem");
     let privkey = load_private_key(privkey_buffer.as_path());
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
+    //println!("ServerConfig; ciphersuites={:?}", config.ciphersuites);
     let rc_config = Arc::new(config);
 
     let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
@@ -83,9 +84,7 @@ fn main () {
                             socket_entry.insert(SocketData{player_name: String::from(""), socket: socket, session: ServerSession::new(&rc_config), state: ClientState::Connected});
                             // Send a Welcome message
                             // player_id (token)
-                            let mut welcome_message: Vec<u8> = Vec::with_capacity(3);
-                            welcome_message.push(8);
-                            welcome_message.push(1);
+                            let mut welcome_message: Vec<u8> = [8,1].to_vec();
                             welcome_message.push(usize::from(token) as u8);
                             message_queue.push((usize::from(token), welcome_message));
 
@@ -98,10 +97,31 @@ fn main () {
                     }
                 },
                 token => {
-                    //println!("Got a token");
                     let mut socket_data = &mut sockets.get_mut(usize::from(token)).unwrap();
+
+
                     if event.readiness().is_readable() && socket_data.session.wants_read() {
-                        match socket_data.session.read_tls(&mut socket_data.socket) {
+                        println!("session[is_handshaking={};]",
+                                socket_data.session.is_handshaking());
+
+
+                    // Print data off socket here to debug TLS from Apple
+                    let mut debug_buf: [u8; 2500] = [0; 2500];
+                    let mut temp_buffer: Vec<u8> = Vec::new();
+                    match socket_data.socket.read(&mut debug_buf) {
+                        Ok(n) => {
+                            println!("Debug Buffer({})={:?}", n, &debug_buf[0..n]);
+                            temp_buffer.extend_from_slice(&debug_buf[0..n]);
+                        },
+
+                        Err(e) => {
+                            println!("Err={}", e);
+                        }
+
+                    }
+
+                        //match socket_data.session.read_tls(&mut socket_data.socket) {
+                        match socket_data.session.read_tls(&mut temp_buffer.as_slice()) {
                             Ok(0) => {
                                 // Client disconnected, find partner client if it exists
                                 let mut partner_token: Option<Token> = None;
@@ -142,7 +162,9 @@ fn main () {
                                     Ok(_) => {
                                         let mut data = Vec::<u8>::new();
                                         match socket_data.session.read_to_end(&mut data) {
-                                            Ok(0) => (),
+                                            Ok(0) => {
+                                                println!("TLS data only");
+                                            },
                                             Ok(1) => unreachable!(),
                                             Ok(n) => {
                                                 debug!("read_to_end: {}", n);
@@ -177,8 +199,23 @@ fn main () {
                     }
 
                     if event.readiness().is_writable() && socket_data.session.wants_write() {
+                        println!("session[is_handshaking={};]",
+                                socket_data.session.is_handshaking());
 
-                        match socket_data.session.write_tls(&mut socket_data.socket) {
+                    // Print data off socket here to debug TLS goimng to Apple
+                    let mut temp_buffer: Vec<u8> = Vec::new();
+                    match socket_data.session.write_tls(&mut temp_buffer) {
+                        Ok(n) => {
+                            println!("Write Debug Buffer({})={:?}", n, temp_buffer);
+                        },
+
+                        Err(e) => {
+                            println!("Err={}", e);
+                        }
+
+                    }
+                        //match socket_data.session.write_tls(&mut socket_data.socket) {
+                        match socket_data.socket.write(temp_buffer.as_slice()) {
                             Ok(size) => {
                                 println!("Wrote {} bytes", size);
                             }
@@ -357,16 +394,6 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                         // make the player move
                         let player_move = data[0];
                         game_data.move_player(usize::from(token), player_move);
-
-                        // send the game board
-                        let game_board = game_data.get_game_board();
-                        println!("Sending board update: {:?}", game_board);
-                        let mut s_data: Vec<u8> = Vec::with_capacity(game_board.len() + 2);
-                        s_data.push(3);
-                        s_data.push(game_board.len() as u8);
-                        s_data.extend_from_slice(&game_board[..]);
-                        message_queue.push((usize::from(partner_token), s_data.clone()));
-                        message_queue.push((usize::from(token), s_data.clone()));
 
                         // Send Move_Player message
                         let mut move_player_message: Vec<u8> = Vec::with_capacity(4);

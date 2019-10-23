@@ -17,6 +17,8 @@ const TALKER: Token = mio::Token(0);
 
 fn main () {
 
+
+
     // rustls configuration
     let mut config = rustls::ClientConfig::new();
     let mut path_buf = home_dir().unwrap();
