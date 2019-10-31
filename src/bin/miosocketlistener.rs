@@ -40,11 +40,11 @@ fn main () {
 
     // rustls configuration
     let mut cert_buffer = home_dir().unwrap();
-    cert_buffer.push("rootCertificate.pem");
+    cert_buffer.push("leaf.crt.pem");
     let mut config = ServerConfig::new(NoClientAuth::new());
     let certs = load_certs(cert_buffer.as_path());
     let mut privkey_buffer = home_dir().unwrap();
-    privkey_buffer.push("rootPrivkey.pem");
+    privkey_buffer.push("leaf.key.pem");
     let privkey = load_private_key(privkey_buffer.as_path());
     config.set_single_cert(certs, privkey).expect("bad certificates/private key");
     //println!("ServerConfig; ciphersuites={:?}", config.ciphersuites);
@@ -182,7 +182,9 @@ fn main () {
                                             Err(e) => panic!(e),
                                         }
                                     }
-                                    Err(err) => panic!("Error: {}", err),
+                                    Err(err) => {
+                                        debug!("Error: {}", err)
+                                    }
                                 }
                             }
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {

@@ -22,7 +22,7 @@ fn main () {
     // rustls configuration
     let mut config = rustls::ClientConfig::new();
     let mut path_buf = home_dir().unwrap();
-    path_buf.push("rootCertificate.pem");
+    path_buf.push("ca.cheese.crt.pem");
 
     let certfile = fs::File::open(path_buf).expect("Cannot open CA file");
     let mut reader = BufReader::new(certfile);
@@ -104,11 +104,14 @@ fn main () {
                             println!("Game Players: {:?} ", game_data.get_player_names());
                             if game_data.is_game_over() {
                                 print!("Play again (yes/no)? ");
-                            } else {
+                            } else if game_data.get_active_player_id() == user_id as u8 {
                                 print!("Enter next move (1,2,3) ");
+                            } else {
+                                println!("Waiting for other player to move");
                             }
                         } else {
                             println!("Player: {} [{}]", style(user_name.clone()).blue(), user_id);
+                            println!("Status: Waiting for opponent");
                         }
                         print!("> ");
                     }
