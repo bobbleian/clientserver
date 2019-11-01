@@ -175,18 +175,23 @@ fn main () {
                                                 data_queue.append(&mut data);
 
                                                 // process the data
-                                                let i = 0;
-                                                while i + 2 <= data_queue.len() {
+                                                while data_queue.len() >= 2 {
                                                     // Ensure we have the entire client message
-                                                    if i + 2 + data_queue[i+1] as usize <= data_queue.len() {
-                                                    process_client_data(data_queue[i], data_queue[i+1], &data_queue[i+2..(i+2+(data_queue[i+1] as usize))], token, &mut socket_data, &mut games, &mut message_queue);
+                                                    let msg_len = data_queue[1] as usize;
+                                                    if data_queue.len() >= 2 + msg_len {
+                                                        process_client_data(
+                                                                data_queue[0],
+                                                                data_queue[1],
+                                                                &data_queue[2..(2+msg_len)],
+                                                                token,
+                                                                &mut socket_data,
+                                                                &mut games,
+                                                                &mut message_queue);
 
-                                                    let vec2 = data_queue.split_off(i + 2 + data_queue[i+1] as usize);
-                                                    data_queue = vec2;
-                                                    debug!("Incremented i: {}", i);
+                                                        let vec2 = data_queue.split_off(2 + msg_len);
+                                                        data_queue = vec2;
                                                     } else {
-                                                        // Do not have current message, break while
-                                                        // Need more data
+                                                        // Do not have full message, need more data
                                                         break;
                                                     }
                                                 }
