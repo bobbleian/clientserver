@@ -50,7 +50,7 @@ fn main () {
     //println!("ServerConfig; ciphersuites={:?}", config.ciphersuites);
     let rc_config = Arc::new(config);
 
-    let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
+    let addr: net::SocketAddr = "192.168.7.67:9797".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
 
     let poll = Poll::new().unwrap();
@@ -60,6 +60,7 @@ fn main () {
 
     // Outgoing message queue
     let mut message_queue = Vec::<(usize, Vec::<u8>)>::new();
+    let mut data_queue = Vec::<u8>::new();
 
     loop {
 
@@ -165,18 +166,29 @@ fn main () {
                                             Ok(0) => {
                                                 println!("TLS data only");
                                             },
-                                            Ok(1) => unreachable!(),
                                             Ok(n) => {
-                                                debug!("read_to_end: {}", n);
-                                                debug!("Got a data: {:?}", data);
+                                                println!("read_to_end: {}", n);
+                                                println!("Got a data: {:?}", data);
+                                                io::stdout().flush().unwrap();
+
+                                                // Append data to data queue
+                                                data_queue.append(&mut data);
 
                                                 // process the data
-                                                let mut i = 0;
-                                                while i < data.len() {
-                                                    process_client_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], token, &mut socket_data, &mut games, &mut message_queue);
+                                                let i = 0;
+                                                while i + 2 <= data_queue.len() {
+                                                    // Ensure we have the entire client message
+                                                    if i + 2 + data_queue[i+1] as usize <= data_queue.len() {
+                                                    process_client_data(data_queue[i], data_queue[i+1], &data_queue[i+2..(i+2+(data_queue[i+1] as usize))], token, &mut socket_data, &mut games, &mut message_queue);
 
-                                                    i = i + 2 + data[i+1] as usize;
+                                                    let vec2 = data_queue.split_off(i + 2 + data_queue[i+1] as usize);
+                                                    data_queue = vec2;
                                                     debug!("Incremented i: {}", i);
+                                                    } else {
+                                                        // Do not have current message, break while
+                                                        // Need more data
+                                                        break;
+                                                    }
                                                 }
                                             },
                                             Err(e) => panic!(e),
