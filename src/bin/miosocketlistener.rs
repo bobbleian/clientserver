@@ -41,6 +41,7 @@ fn main () {
     // rustls configuration
     let mut cert_buffer = home_dir().unwrap();
     cert_buffer.push("leaf.crt.pem");
+    println!("{:?}", cert_buffer);
     let mut config = ServerConfig::new(NoClientAuth::new());
     let certs = load_certs(cert_buffer.as_path());
     let mut privkey_buffer = home_dir().unwrap();
@@ -50,7 +51,7 @@ fn main () {
     //println!("ServerConfig; ciphersuites={:?}", config.ciphersuites);
     let rc_config = Arc::new(config);
 
-    let addr: net::SocketAddr = "192.168.7.67:9797".parse().unwrap();
+    let addr: net::SocketAddr = "0.0.0.0:9797".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
 
     let poll = Poll::new().unwrap();

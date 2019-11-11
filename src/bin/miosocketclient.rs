@@ -42,7 +42,7 @@ fn main () {
 
     let poll = Poll::new().unwrap();
 
-    let addr: net::SocketAddr = "192.168.7.67:9797".parse().unwrap();
+    let addr: net::SocketAddr = "96.50.232.109:9797".parse().unwrap();
     match TcpStream::connect(&addr) {
         Ok(mut stream) => {
             // Spawn thread to read user input
