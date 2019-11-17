@@ -199,3 +199,44 @@ impl GameState for GameOver {
 }
 
 
+pub enum Message {
+    // Client Messages
+    ClientUserName = 0,
+    PlayerMove = 1,
+    RestartGame = 2,
+    EndGame = 3,
+
+    // Server Messages
+    OpponentDisconnect = 128,
+    GameData = 4,
+    AddPlayer = 5,
+    MovePlayer = 6,
+    SetActivePlayer = 7,
+    Welcome = 8,
+    ServerUserName = 9,
+}
+
+impl Message {
+    pub fn from_u8(value: u8) -> Option<Message> {
+        match value {
+            // Client Messages
+            0 => Some(Message::ClientUserName),
+            1 => Some(Message::PlayerMove),
+            2 => Some(Message::RestartGame),
+            3 => Some(Message::EndGame),
+
+            // Server Messages
+            128 => Some(Message::OpponentDisconnect),  // Changed from 0
+            4 => Some(Message::GameData),
+            5 => Some(Message::AddPlayer),
+            6 => Some(Message::MovePlayer),
+            7 => Some(Message::SetActivePlayer),
+            8 => Some(Message::Welcome),
+            9 => Some(Message::ServerUserName),
+
+            // Not Found
+            _ => None,
+        }
+    }
+}
+

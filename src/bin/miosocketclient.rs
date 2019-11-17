@@ -6,7 +6,7 @@ use log::{debug, warn};
 
 use mio::{Events, Poll, Ready, PollOpt, Token, net::TcpStream};
 
-use clientserver::game::GameData;
+use clientserver::game::{GameData,Message};
 
 use rustls::{ClientSession,Session};
 use console::{Term, style, Style};
@@ -42,7 +42,8 @@ fn main () {
 
     let poll = Poll::new().unwrap();
 
-    let addr: net::SocketAddr = "96.50.232.109:9797".parse().unwrap();
+    //let addr: net::SocketAddr = "96.50.232.109:9797".parse().unwrap();
+    let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     match TcpStream::connect(&addr) {
         Ok(mut stream) => {
             // Spawn thread to read user input
@@ -127,15 +128,12 @@ fn main () {
 
                         // Check to see if we have a user name
                         if user_name.is_empty() {
-                            // Set user name in the client
-                            user_name = buffer.clone().trim().to_string();
-
                             // Send User_Name message
-                            // control_byte: 0
+                            // control_byte: Message::ClientUserName (0)
                             // data_len: n
                             // data[0..n] = user name
-                            let mut user_name_message: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
-                            user_name_message.push(0);
+                            //let mut user_name_message: Vec<u8> = Vec::with_capacity(buffer_data.len() + 2);
+                            let mut user_name_message: Vec<u8> = [Message::ClientUserName as u8].to_vec();
                             user_name_message.push(buffer_data.len() as u8);
                             user_name_message.extend_from_slice(&buffer_data[..]);
                             client.write(&user_name_message).unwrap();
@@ -144,15 +142,15 @@ fn main () {
                                 if game_data.is_game_over() {
                                     if "yes".eq_ignore_ascii_case(&buffer) {
                                         // Send Restart_Game message
-                                        // control_byte: 2
+                                        // control_byte: Message::RestartGame (2)
                                         // data_len: 0
-                                        let restart_game_message: Vec<u8> = [2, 0].to_vec();
+                                        let restart_game_message: Vec<u8> = [Message::RestartGame as u8, 0].to_vec();
                                         client.write(&restart_game_message).unwrap();
                                     } else if "no".eq_ignore_ascii_case(&buffer) {
                                         // Send End_Game message
-                                        // control_byte: 3
+                                        // control_byte: Message::EndGame (3)
                                         // data_len: 0
-                                        let end_game_message: Vec<u8> = [3, 0].to_vec();
+                                        let end_game_message: Vec<u8> = [Message::EndGame as u8, 0].to_vec();
                                         client.write(&end_game_message).unwrap();
                                     }
                                 } else {
@@ -161,12 +159,10 @@ fn main () {
                                     match buffer.parse::<u8>() {
                                         Ok(player_move) => {
                                             // Send Player_Move message
-                                            // control_byte: 1
+                                            // control_byte: Message::PlayerMove (1)
                                             // data_len: 1
                                             // data[0]: player_move
-                                            let mut player_move_message: Vec<u8> = Vec::with_capacity(3);
-                                            player_move_message.push(1);
-                                            player_move_message.push(1);
+                                            let mut player_move_message: Vec<u8> = [Message::PlayerMove as u8, 1].to_vec();
                                             player_move_message.push(player_move);
                                             client.write(&player_move_message).unwrap();
                                         },
@@ -237,7 +233,13 @@ fn main () {
                                     // process the data
                                     let mut i = 0;
                                     while i < data.len() {
-                                        process_server_data(data[i], data[i+1], &data[i+2..(i+2+(data[i+1] as usize))], &mut game_data, &mut user_id);
+                                        process_server_data(
+                                            data[i],
+                                            data[i+1],
+                                            &data[i+2..(i+2+(data[i+1] as usize))],
+                                            &mut game_data,
+                                            &mut user_id,
+                                            &mut user_name);
                                         i = i + 2 + data[i+1] as usize;
                                         debug!("Incremented i: {}", i);
                                     }
@@ -272,48 +274,25 @@ fn main () {
 }
 
 
-fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &mut Option<GameData>, user_id: &mut usize) {
+fn process_server_data(
+        control_byte: u8,
+        data_len: u8,
+        data: &[u8],
+        game_data: &mut Option<GameData>,
+        user_id: &mut usize,
+        user_name: &mut String) {
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
-    match control_byte {
+    match Message::from_u8(control_byte) {
         // 0: Opponent_Disconnect message
-        0 => {
+        Some(Message::OpponentDisconnect) => {
             println!("Your chat partner has ended the conversation...");
 
             // Get rid of the game
             *game_data = None;
         },
 
-        // 1: New message from opponent (TODO - chat?)
-        1 => {
-            // Echo everything to stdout
-            match str::from_utf8(data) {
-                Ok(v) => {
-                    print!("{}> ", v);
-                    io::stdout().flush().unwrap();
-                }
-                Err(_) => panic!("invalid utf-8 sequence!"),
-            };
-        },
-
-        // 2: Partner name message (legacy)
-        2 => {
-            // Echo everything to stdout
-            match str::from_utf8(data) {
-                Ok(v) => {
-                    print!("[{}] ", v);
-                }
-                Err(_) => panic!("invalid utf-8 sequence!"),
-            };
-        },
-
-        // 3: Game Board update (legacy)
-        3 => {
-            //game_board.clear();
-            //game_board.extend_from_slice(data);
-        },
-
         // 4: Game Data update
-        4 => {
+        Some(Message::GameData) => {
             // Game Data only contains 3 fields:
             // max_players
             // max_move
@@ -329,7 +308,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
         // 5: Add_Player message
         // data[0] - player id
         // data[1..] - player name
-        5 => {
+        Some(Message::AddPlayer) => {
             // Process add player only if we already have a GameData struct
             if let Some(ref mut game_data) = game_data {
                 let player_id = data[0] as usize;
@@ -341,7 +320,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
         // 6: Move_Player message
         // data[0] - player_id
         // data[1] - player_move
-        6 => {
+        Some(Message::MovePlayer) => {
             // Process add player only if we already have a GameData struct
             if let Some(ref mut game_data) = game_data {
                 let player_id = data[0] as usize;
@@ -352,7 +331,7 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
 
         // 7: Set_Active_Player message
         // data[0] - player_id
-        7 => {
+        Some(Message::SetActivePlayer) => {
             // Process set active player only if we already have a GameData struct
             if let Some(ref mut game_data) = game_data {
                 let player_id = data[0] as usize;
@@ -362,15 +341,27 @@ fn process_server_data(control_byte: u8, data_len: u8, data: &[u8], game_data: &
 
         // 8: Welcome message
         // data[0] - player_id
-        8 => {
+        Some(Message::Welcome) => {
             // Set user_id to player_id
             *user_id = data[0] as usize;
         },
 
+        // 9: User_Name message
+        // data[..] - user_name
+        Some(Message::ServerUserName) => {
+            let v = str::from_utf8(data).unwrap().to_string();
+            *user_name = v;
+        },
+
 
         // Unknown control byte; do nothing?
-        unknown => {
-            println!("Unknown control byte: {}", unknown);
+        Some(unknown) => {
+            println!("Unknown control byte: {}", unknown as u8);
+        },
+
+        None => {
+            println!("Unknown control byte: empty");
         }
+
     }
 }

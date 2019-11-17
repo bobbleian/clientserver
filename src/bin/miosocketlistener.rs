@@ -2,6 +2,7 @@ use std::{str,fs};
 use std::io::{self, Read, Write, BufReader};
 use std::net;
 use std::sync::{Arc};
+use std::collections::HashSet;
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::{TcpListener, TcpStream};
@@ -12,7 +13,7 @@ use dirs::home_dir;
 use rustls;
 use rustls::{ServerConfig,ServerSession,Session,NoClientAuth};
 
-use clientserver::game::GameData;
+use clientserver::game::{GameData,Message};
 
 use slab::Slab;
 
@@ -37,6 +38,7 @@ fn main () {
     // Used to store the sockets.
     let mut sockets: Slab<SocketData> = Slab::with_capacity(MAX_SOCKETS);
     let mut games: Vec<GameData> = Vec::new();
+    let mut names: HashSet<String> = HashSet::new();
 
     // rustls configuration
     let mut cert_buffer = home_dir().unwrap();
@@ -51,7 +53,8 @@ fn main () {
     //println!("ServerConfig; ciphersuites={:?}", config.ciphersuites);
     let rc_config = Arc::new(config);
 
-    let addr: net::SocketAddr = "0.0.0.0:9797".parse().unwrap();
+    //let addr: net::SocketAddr = "0.0.0.0:9797".parse().unwrap();
+    let addr: net::SocketAddr = "127.0.0.1:9797".parse().unwrap();
     let listener = TcpListener::bind(&addr).unwrap();
 
     let poll = Poll::new().unwrap();
@@ -86,7 +89,7 @@ fn main () {
                             socket_entry.insert(SocketData{player_name: String::from(""), socket: socket, session: ServerSession::new(&rc_config), state: ClientState::Connected});
                             // Send a Welcome message
                             // player_id (token)
-                            let mut welcome_message: Vec<u8> = [8,1].to_vec();
+                            let mut welcome_message: Vec<u8> = [Message::Welcome as u8, 1].to_vec();
                             welcome_message.push(usize::from(token) as u8);
                             message_queue.push((usize::from(token), welcome_message));
 
@@ -139,7 +142,9 @@ fn main () {
                                     match sockets.get(usize::from(partner_token)).unwrap().state {
                                         ClientState::GameInProgress(_token) => {
                                             println!("Client disconnected, update partner");
-                                            message_queue.push((usize::from(partner_token), [0, 0].to_vec()));
+                                            let disconnect_message: Vec<u8> =
+                                                [Message::OpponentDisconnect as u8, 0].to_vec();
+                                            message_queue.push((usize::from(partner_token), disconnect_message));
                                             sockets.get_mut(usize::from(partner_token)).unwrap().state = ClientState::WaitingOnOpponent;
                                         },
                                         _ => unreachable!(),
@@ -149,7 +154,8 @@ fn main () {
                                 // Socket is closed
                                 println!("Socket closed");
                                 poll.deregister(& sockets.get(usize::from(token)).unwrap().socket).unwrap();
-                                sockets.remove(usize::from(token));
+                                let gd = sockets.remove(usize::from(token));
+                                names.remove(&gd.player_name);
 
                                 // Remove/Update GameData
                                 games.retain(|game| {
@@ -187,6 +193,7 @@ fn main () {
                                                                 token,
                                                                 &mut socket_data,
                                                                 &mut games,
+                                                                &mut names,
                                                                 &mut message_queue);
 
                                                         let vec2 = data_queue.split_off(2 + msg_len);
@@ -318,20 +325,17 @@ fn main () {
 
                             // Send GameData message to clients:
                             // max_players, max_move, game_board_size
-                            let mut game_data_message = Vec::<u8>::with_capacity(5);
-                            game_data_message.extend_from_slice(&[4,3,2,3,10]);
+                            let game_data_message: Vec<u8> = [Message::GameData as u8,3,2,3,10].to_vec();
                             message_queue.push((usize::from(partner1_token), game_data_message.clone()));
                             message_queue.push((usize::from(partner2_token), game_data_message));
 
                             // Send Add_Player messages to both clients
-                            let mut add_player1_message = Vec::<u8>::new();
-                            add_player1_message.push(5);
+                            let mut add_player1_message: Vec<u8> = [Message::AddPlayer as u8].to_vec();
                             add_player1_message.push((partner1_name.as_bytes().len() + 1) as u8);
                             add_player1_message.push(usize::from(partner1_token) as u8);
                             add_player1_message.extend_from_slice(partner1_name.as_bytes());
 
-                            let mut add_player2_message = Vec::<u8>::new();
-                            add_player2_message.push(5);
+                            let mut add_player2_message: Vec<u8> = [Message::AddPlayer as u8].to_vec();
                             add_player2_message.push((partner2_name.as_bytes().len() + 1) as u8);
                             add_player2_message.push(usize::from(partner2_token) as u8);
                             add_player2_message.extend_from_slice(partner2_name.as_bytes());
@@ -344,9 +348,7 @@ fn main () {
 
                             // Send Set_Active_Player message to both clients
                             // player_id
-                            let mut set_active_player_message = Vec::<u8>::with_capacity(3);
-                            set_active_player_message.push(7);
-                            set_active_player_message.push(1);
+                            let mut set_active_player_message: Vec<u8> = [Message::SetActivePlayer as u8,1].to_vec();
                             set_active_player_message.push(game_data.get_active_player_id());
 
                             message_queue.push((usize::from(partner1_token), set_active_player_message.clone()));
@@ -373,7 +375,16 @@ fn main () {
     }
 }
 
-fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token, socket_data: &mut SocketData, games: &mut Vec<GameData>, message_queue: &mut Vec::<(usize, Vec::<u8>)>) {
+fn process_client_data(
+        control_byte: u8,
+        data_len: u8,
+        data: &[u8],
+        token: Token,
+        socket_data: &mut SocketData,
+        games: &mut Vec<GameData>,
+        names: &mut HashSet<String>,
+        message_queue: &mut Vec::<(usize, Vec::<u8>)>) {
+
     println!("Processing [control_byte: {}; data_len: {}; data: {:?}]", control_byte, data_len, data);
     match control_byte {
 
@@ -390,11 +401,19 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
             match socket_data.state {
                 // Only process when client is in Connected state
                 ClientState::Connected => {
-                    println!("Got client name, now WaitingOnOpponent");
-                    // Update client status to WaitingOnOpponent
-                    socket_data.state = ClientState::WaitingOnOpponent;
-                    socket_data.player_name = v;
+                    // Ensure name is not already in use
+                    if names.insert(v.clone()) {
+                        println!("Got client name, now WaitingOnOpponent");
+                        // Update client status to WaitingOnOpponent
+                        socket_data.state = ClientState::WaitingOnOpponent;
+                        socket_data.player_name = v.clone();
 
+                        // Send user name back to client
+                        let mut user_name_message: Vec<u8> = [Message::ServerUserName as u8].to_vec();
+                        user_name_message.push(v.as_bytes().len() as u8);
+                        user_name_message.extend_from_slice(v.as_bytes());
+                        message_queue.push((usize::from(token), user_name_message));
+                    }
                 },
                 _ => {
                     // Do nothing
@@ -416,9 +435,7 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                         game_data.move_player(usize::from(token), player_move);
 
                         // Send Move_Player message
-                        let mut move_player_message: Vec<u8> = Vec::with_capacity(4);
-                        move_player_message.push(6);
-                        move_player_message.push(2);
+                        let mut move_player_message: Vec<u8> = [Message::MovePlayer as u8, 2].to_vec();
                         move_player_message.push(usize::from(token) as u8);
                         move_player_message.push(player_move);
 
@@ -447,9 +464,7 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                             game_data.add_player(usize::from(token), "");
 
                             // Send Add_Player messages to both clients
-                            let mut add_player_message = Vec::<u8>::new();
-                            add_player_message.push(5);
-                            add_player_message.push(1);
+                            let mut add_player_message: Vec<u8> = [Message::AddPlayer as u8, 1].to_vec();
                             add_player_message.push(usize::from(token) as u8);
 
                             message_queue.push((usize::from(partner_token), add_player_message.clone()));
@@ -479,7 +494,7 @@ fn process_client_data(control_byte: u8, data_len: u8, data: &[u8], token: Token
                         // Ensure game is over
                         if game_data.is_game_over() {
                             // Send Opponent_Disconnect messages to both clients
-                            let disconnect_message: Vec::<u8> = [0, 0].to_vec();
+                            let disconnect_message: Vec::<u8> = [Message::OpponentDisconnect as u8, 0].to_vec();
 
                             message_queue.push((usize::from(partner_token), disconnect_message.clone()));
                             message_queue.push((usize::from(token), disconnect_message));
